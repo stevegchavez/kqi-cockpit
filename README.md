@@ -37,14 +37,14 @@ including battery % matching the scooter's own display.
 
 **Verified on a real iPhone (Bluefy) with a KQi 200F, by hand:** the app connects, completes
 the handshake with the saved keys, shows the live battery %, and the live speed moves and
-roughly matches the scooter's own display.
+roughly matches the scooter's own display. The battery health (93%), power state (ON) and top
+speed (30 km/h) readouts also match what the `niu-kqi` command-line tool read from the same
+scooter.
 
 **Still not verified:**
 
 - **Speed accuracy.** Speeds are reported as km/h × 10. The scale is confirmed for the top-speed
   field, and the live speed looked right by eye, but it hasn't been compared precisely.
-- The **battery health, power state and top speed** readouts haven't been checked against the
-  scooter on a phone yet.
 - A full **recorded ride** with GPS and a saved route.
 - Odometer isn't shown (no field has been confirmed for it).
 
