@@ -133,6 +133,65 @@ test('splitNotification splits concatenated 20-byte frames and passes others thr
   assert.strictEqual(P.splitNotification(new Uint8Array(7)).length, 1);
 });
 
+// ---- Diagnostics: every field type against the full catalogue (reference vectors)
+const Fields = require('../js/fields.js');
+for (const [group, d] of Object.entries(V.diag)) {
+  test(`diagnostics "${group}": request matches the reference (${Object.values(d.types).join(', ')})`, () => {
+    assert.deepStrictEqual(hexList(P.buildRead(d.names, V.aes, Fields.FIELDS)), d.request);
+  });
+  test(`diagnostics "${group}": reply decodes to the reference values and the raw bytes`, () => {
+    const got = P.parseReadFramesDetailed(d.replyFrames.map(h), d.names, V.aes, Fields.FIELDS);
+    assert.deepStrictEqual(got.values, d.expected);
+    assert.deepStrictEqual(got.raws, d.raws);
+  });
+}
+
+test('the diagnostics vectors cover every kind of value: unsigned, signed, float, hex and text', () => {
+  const types = new Set(Object.values(V.diag).flatMap((d) => Object.values(d.types)));
+  for (const t of ['U8', 'U16', 'U32', 'S8', 'S16', 'S32', 'F32', 'HEX', 'UTF-8']) assert.ok(types.has(t), `no vector for ${t}`);
+});
+
+test('a 128-byte field arrives as eight frames and reassembles intact', () => {
+  const d = V.diag.bigHex;
+  assert.strictEqual(d.replyFrames.length, 8);
+  const got = P.parseReadFramesDetailed(d.replyFrames.map(h), d.names, V.aes, Fields.FIELDS);
+  assert.strictEqual(got.raws.db_island_notification.length, 256);
+  assert.strictEqual(got.raws.db_island_notification, d.raws.db_island_notification);
+});
+
+test('signed fields decode negative values (two\'s complement)', () => {
+  assert.strictEqual(P.decodeValue({ type: 'S8', len: 1 }, h('fe')), -2);
+  assert.strictEqual(P.decodeValue({ type: 'S16', len: 2 }, h('fffd')), -3);
+  assert.strictEqual(P.decodeValue({ type: 'S32', len: 4 }, h('fffffffc')), -4);
+  assert.strictEqual(P.decodeValue({ type: 'S16', len: 2 }, h('7fff')), 32767);
+  assert.strictEqual(P.decodeValue({ type: 'S16', len: 2 }, h('8000')), -32768);
+});
+
+test('floats decode big-endian, and a float field of the wrong size is rejected', () => {
+  assert.strictEqual(P.decodeValue({ type: 'F32', len: 4 }, h('3fc00000')), 1.5);
+  assert.strictEqual(P.decodeValue({ type: 'F64', len: 8 }, h('3ff8000000000000')), 1.5);
+  assert.throws(() => P.decodeValue({ type: 'F32', len: 3 }, h('3fc000')), /must be 4 bytes/);
+});
+
+test('decoding refuses types it does not know instead of guessing', () => {
+  assert.throws(() => P.decodeValue({ type: 'MYSTERY', len: 1 }, h('00')), /unsupported field type/);
+});
+
+test('push frames decode to named values, stopping at the zero padding', () => {
+  assert.deepStrictEqual(P.parsePush(h(V.push.frame), V.aes, Fields.BY_CODE, Fields.FIELDS), V.push.expected);
+});
+
+test('a push with a code outside the catalogue keeps the rest as raw hex and names what came before', () => {
+  const got = P.parsePush(h(V.pushUnknown.frame), V.aes, Fields.BY_CODE, Fields.FIELDS);
+  assert.deepStrictEqual(got, V.pushUnknown.expected);
+  assert.ok('code_ABCDEF' in got);
+});
+
+test('a corrupted push frame is rejected', () => {
+  const bad = h(V.push.frame); bad[19] ^= 1;
+  assert.throws(() => P.parsePush(bad, V.aes, Fields.BY_CODE, Fields.FIELDS), /bad checksum/);
+});
+
 // ---- interpretation
 test('interpretStatus turns the live-style reply into dashboard telemetry', () => {
   const t = P.interpretStatus(V.reads.fast.expected);

@@ -38,9 +38,17 @@ class FakeScooter {
     this.silent = false;           // when true, never answers (simulates a dead link)
     this.verified = false;
     this.log = [];                 // every received request, for assertions
+    this.requested = [];           // every field code ever asked for (upper-case hex), for safety assertions
     this._rnd = null;
     this._reply = null;
     this._pending = [];            // decrypted blocks of a multi-frame read request
+  }
+
+  /** An unsolicited frame the scooter might push: code+value pairs in one encrypted block. */
+  push(pairs) {
+    const block = Buffer.alloc(16);
+    Buffer.concat(pairs.map(([code, value]) => Buffer.concat([Buffer.from(code, 'hex'), value]))).copy(block);
+    return frame([0x01, 0x27], 0x00, aes(this.aesKey, block, true));
   }
 
   /** Feed one 20-byte frame from the app; returns the reply frames (possibly none). */
@@ -81,13 +89,15 @@ class FakeScooter {
         codes.push(code);
       }
       this.log.push('read ' + codes.join(','));
+      this.requested.push(...codes);
       if (codes.some((c) => this.refuse.has(c) || !this.fields[c])) {
         return [frame([0x01, 0xe1], 0x00, aes(this.aesKey, Buffer.concat([Buffer.from([0x40]), Buffer.alloc(15)]), true))];
       }
       const out = Buffer.concat(codes.map((c) => {
         const f = this.fields[c];
         const b = Buffer.alloc(f.len);
-        if (f.text !== undefined) b.write(f.text, 'latin1');
+        if (f.hex !== undefined) Buffer.from(f.hex, 'hex').copy(b);
+        else if (f.text !== undefined) b.write(f.text, 'latin1');
         else for (let i = 0; i < f.len; i++) b[f.len - 1 - i] = Math.floor(f.value / 2 ** (8 * i)) & 0xff;
         return b;
       }));

@@ -47,7 +47,7 @@ window.L = {
 // desktop browser without BLE/GPS — app.js is expected to degrade
 // gracefully rather than throw.
 
-const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'geo.js', 'app.js'];
+const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'geo.js', 'app.js'];
 
 let passed = 0;
 const queue = [];
@@ -66,7 +66,7 @@ test('every js/*.js file executes in the page context without throwing', () => {
 
 test('NIU namespace is fully populated after boot', () => {
   assert.ok(window.NIU, 'window.NIU should exist');
-  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker', 'Insights', 'Exporters', 'Charts', 'Battery']) {
+  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker', 'Insights', 'Exporters', 'Charts', 'Battery', 'Fields', 'Diagnostics', 'DiagUI']) {
     assert.ok(window.NIU[key], `window.NIU.${key} should be defined`);
   }
 });
@@ -245,7 +245,7 @@ async function until(fn, what, ms = 4000) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-function bootApp({ bluetooth = true, keys = true } = {}) {
+function bootApp({ bluetooth = true, keys = true, extraFields = null } = {}) {
   const w = new JSDOM(html, { url: 'https://example.com/index.html', runScripts: 'outside-only', pretendToBeVisual: true }).window;
   w.indexedDB = new IDBFactory();           // private, empty database per window
   w.IDBKeyRange = FakeIDBKeyRange;
@@ -269,7 +269,7 @@ function bootApp({ bluetooth = true, keys = true } = {}) {
   Object.defineProperty(w.navigator, 'share', { value: async (d) => { shared.push(d); } });
   let scooter = null;
   if (bluetooth) {
-    scooter = new FakeScooter({ password: PWD, aesKey: AES, fields: defaultFields() });
+    scooter = new FakeScooter({ password: PWD, aesKey: AES, fields: Object.assign(defaultFields(), extraFields || {}) });
     Object.defineProperty(w.navigator, 'bluetooth', { value: fakeBluetooth(scooter).bluetooth });
   }
   for (const file of files) w.eval(fs.readFileSync(path.join(root, 'js', file), 'utf8'));
@@ -424,6 +424,229 @@ test('exports are offered only when there is something to export', async () => {
   app.$('exportAllBtn').click();
   await until(() => app.shared.length === 1, 'summary share');
   assert.match(app.shared[0].files[0].name, /^niu-rides-.*\.csv$/);
+  app.w.close();
+});
+
+
+// =====================================================================
+// Diagnostics (read-only field explorer), end to end
+// =====================================================================
+const Catalogue = require('../js/fields.js');
+const codeOf = (n) => Catalogue.FIELDS[n].code;
+const SERIAL = 'SN-SECRET-12345';
+const diagExtras = () => ({
+  [codeOf('db_mileage')]: { len: 4, value: 12345 },
+  [codeOf('db_sn')]: { len: 16, text: SERIAL },
+  [codeOf('ble_mac')]: { len: 8, hex: 'a1b2c3d4e5f60708' },
+  [codeOf('db_k_function_status')]: { len: 4, value: 0b1000010 },
+  [codeOf('db_k_hw_ver')]: { len: 8, text: '<b>x</b>' },        // hostile-looking text: must render as text
+});
+const readText = (w, file) => new Promise((res, rej) => { const r = new w.FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });
+async function openDiagnostics(app) {
+  await connect(app);
+  app.tab('setupScreen');
+  app.$('openDiagBtn').click();
+}
+const scanDone = (app) => until(() => /^Scan complete/.test(app.$('diagStatus').textContent), 'the scan to finish', 25000);
+
+test('every element ID used by diag-ui.js exists in index.html', () => {
+  const src = fs.readFileSync(path.join(root, 'js', 'diag-ui.js'), 'utf8');
+  const ids = [...new Set([...src.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]))];
+  assert.ok(ids.length >= 15, `expected many ids, found ${ids.length}`);
+  const missing = ids.filter((id) => !window.document.getElementById(id));
+  assert.deepStrictEqual(missing, []);
+});
+
+test('Diagnostics: without a connection it explains itself and offers no actions', async () => {
+  const app = bootApp({ bluetooth: false });
+  app.tab('setupScreen');
+  app.$('openDiagBtn').click();
+  assert.ok(app.$('diagScreen').classList.contains('active'));
+  assert.match(app.$('diagStatus').textContent, /Not connected/);
+  for (const id of ['scanBtn', 'snapABtn', 'snapBBtn', 'compareBtn', 'watchBtn', 'exportDiagBtn', 'previewDiagBtn']) {
+    assert.strictEqual(app.$(id).disabled, true, `${id} should be disabled`);
+  }
+  app.$('scanBtn').click();
+  await wait(50);
+  assert.strictEqual(app.$('diagResults').children.length, 0);
+  app.$('closeDiagBtn').click();
+  assert.ok(!app.$('diagScreen').classList.contains('active'));
+  app.w.close();
+});
+
+test('Diagnostics E2E: scan, hidden identifiers, safe rendering, and nothing sensitive requested', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  assert.strictEqual(app.$('scanBtn').disabled, false);
+  app.$('scanBtn').click();
+  assert.strictEqual(app.$('scanBtn').disabled, true, 'cannot start a second scan during a scan');
+  assert.strictEqual(app.$('cancelScanBtn').style.display, 'inline-block');
+  await scanDone(app);
+
+  assert.match(app.$('diagSummary').textContent, /\d+ answered · \d+ refused · 40 skipped \(never read\)/);
+  const table = app.$('diagResults');
+  const rowFor = (name) => [...table.children].find((r) => r.children[0].textContent === name);
+  assert.strictEqual(rowFor('bms_soc_rt').children[1].textContent, '59');
+  assert.strictEqual(rowFor('db_mileage').children[1].textContent, '12345');
+
+  // identifiers are hidden on screen until revealed
+  assert.strictEqual(rowFor('db_sn').children[1].textContent, '••• hidden');
+  assert.ok(!table.textContent.includes(SERIAL), 'serial must not be on screen by default');
+  assert.ok(!table.textContent.includes('a1b2c3d4'), 'MAC must not be on screen by default');
+  app.$('revealCheck').checked = true;
+  app.$('revealCheck').dispatchEvent(new app.w.Event('change'));
+  assert.ok(app.$('diagResults').textContent.includes(SERIAL), 'revealing shows it');
+
+  // scooter-supplied text is rendered as text, never as markup
+  assert.strictEqual(rowFor('db_k_hw_ver') ? 1 : 1, 1);
+  const hw = [...app.$('diagResults').children].find((r) => r.children[0].textContent === 'db_k_hw_ver');
+  assert.strictEqual(hw.children[1].textContent, JSON.stringify('<b>x</b>'));
+  assert.strictEqual(app.$('diagResults').querySelector('b'), null, 'no element may be created from scooter text');
+
+  // skipped fields are only listed when answered-only is off
+  assert.ok(![...app.$('diagResults').children].some((r) => r.children[0].textContent === 'nfc_card_id_1'));
+  app.$('answeredOnlyCheck').checked = false;
+  app.$('answeredOnlyCheck').dispatchEvent(new app.w.Event('change'));
+  const nfc = [...app.$('diagResults').children].find((r) => r.children[0].textContent === 'nfc_card_id_1');
+  assert.strictEqual(nfc.children[1].textContent, 'skipped: credential');
+
+  // the filter narrows the list
+  app.$('diagFilter').value = 'soc_rt';
+  app.$('diagFilter').dispatchEvent(new app.w.Event('input'));
+  assert.ok([...app.$('diagResults').children].every((r) => r.children[0].textContent.includes('soc_rt')));
+
+  // SAFETY: no credential or command field was ever requested from the scooter
+  const asked = new Set(app.scooter.requested);
+  for (const [name, spec] of Object.entries(Catalogue.FIELDS)) {
+    if (require('../js/diagnostics.js').skipReason(name)) assert.ok(!asked.has(spec.code), `${name} was requested`);
+  }
+  app.w.close();
+});
+
+test('Diagnostics E2E: the dashboard polling pauses during a scan and resumes afterwards', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  const before = app.scooter.log.length;
+  app.$('scanBtn').click();
+  await scanDone(app);
+  const lines = app.scooter.log.slice(before);
+  const isDashboard = (l) => l === 'read 21000B,31001C,110004,110006,31004C' || l === 'read 21003B,310016,110002,310018';
+  const scanIdx = lines.map((l, i) => [l, i]).filter(([l]) => l.startsWith('read') && !isDashboard(l)).map(([, i]) => i);
+  assert.ok(scanIdx.length > 50, 'the scan should have sent many requests');
+  const first = scanIdx[0], last = scanIdx[scanIdx.length - 1];
+  const interleaved = lines.slice(first, last + 1).filter(isDashboard);
+  assert.deepStrictEqual(interleaved, [], 'no dashboard poll may fall between the first and last scan request');
+  const mark = app.scooter.log.length;
+  await until(() => app.scooter.log.slice(mark).some((l) => l.startsWith('read 21000B,31001C')), 'dashboard polling to resume', 5000);
+  app.w.close();
+});
+
+test('Diagnostics E2E: snapshot A, change something, snapshot B, compare shows the bits that flipped', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  assert.strictEqual(app.$('snapABtn').disabled, true, 'snapshots need a scan first');
+  app.$('scanBtn').click();
+  await scanDone(app);
+  app.$('snapABtn').click();
+  await until(() => /Snapshot A taken/.test(app.$('diagStatus').textContent), 'snapshot A');
+  assert.strictEqual(app.$('compareBtn').disabled, true, 'compare needs both snapshots');
+  app.scooter.fields[codeOf('db_k_function_status')].value = 0b1010010;     // bit 16 on, bit 2 and 64 unchanged
+  app.$('snapBBtn').click();
+  await until(() => /Snapshot B taken/.test(app.$('diagStatus').textContent), 'snapshot B');
+  assert.strictEqual(app.$('compareBtn').disabled, false);
+  app.$('compareBtn').click();
+  assert.match(app.$('diagStatus').textContent, /1 field differ/);
+  const rows = [...app.$('diagChanges').children].map((r) => r.textContent);
+  const line = rows.find((r) => r.includes('db_k_function_status'));
+  assert.ok(line, rows.join(' | '));
+  assert.match(line, /66 → 82/);
+  assert.match(line, /bits \+16/);
+  app.w.close();
+});
+
+test('Diagnostics E2E: watching reports a change as it happens, and stopping resumes the dashboard', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  app.$('scanBtn').click();
+  await scanDone(app);
+  app.$('watchBtn').click();
+  await until(() => app.$('watchBtn').textContent === 'Stop watching', 'watching to start');
+  assert.strictEqual(app.$('scanBtn').disabled, true, 'cannot scan while watching');
+  await wait(1800);                                                          // baseline pass first
+  app.scooter.fields[codeOf('db_mileage')].value = 12399;
+  await until(() => [...app.$('diagChanges').children].some((r) => r.textContent.includes('db_mileage') && r.textContent.includes('12345 → 12399')), 'the change to show', 8000);
+  app.$('watchBtn').click();
+  await until(() => app.$('watchBtn').textContent === 'Start watching', 'watching to stop');
+  assert.match(app.$('diagStatus').textContent, /Stopped watching/);
+  const mark = app.scooter.log.length;
+  await until(() => app.scooter.log.slice(mark).some((l) => l.startsWith('read 21000B,31001C')), 'dashboard polling to resume', 5000);
+  app.w.close();
+});
+
+test('Diagnostics E2E: closing the screen stops a running watch', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  app.$('scanBtn').click();
+  await scanDone(app);
+  app.$('watchBtn').click();
+  await until(() => app.$('watchBtn').textContent === 'Stop watching', 'watching to start');
+  app.$('closeDiagBtn').click();
+  await until(() => app.$('watchBtn').textContent === 'Start watching', 'the watch to stop');
+  app.w.close();
+});
+
+test('Diagnostics E2E: the exported report is valid, redacted, keyless, and carries the note', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  app.$('scanBtn').click();
+  await scanDone(app);
+  app.$('diagNote').value = 'A: lights off, B: lights on';
+  app.$('revealCheck').checked = true;                     // even with identifiers revealed on screen, exports stay redacted
+  app.$('revealCheck').dispatchEvent(new app.w.Event('change'));
+  app.$('exportDiagBtn').click();
+  await until(() => app.shared.length === 1, 'the report to be shared');
+  const file = app.shared[0].files[0];
+  assert.match(file.name, /^niu-diagnostics-\d{8}T\d{6}Z\.json$/);
+  assert.strictEqual(file.type, 'application/json');
+  const text = await readText(app.w, file);
+  const report = JSON.parse(text);
+  assert.strictEqual(report.note, 'A: lights off, B: lights on');
+  assert.strictEqual(report.summary.total, 299);
+  assert.strictEqual(report.summary.skipped, 40);
+  assert.strictEqual(report.scooter.bleVersion, 10);
+  assert.strictEqual(report.scooter.name, 'NIU KQi');
+  assert.ok(!text.includes(SERIAL), 'serial leaked into the exported report');
+  assert.ok(!text.includes('a1b2c3d4e5f60708'), 'MAC leaked into the exported report');
+  assert.ok(!text.includes(PWD) && !text.includes(AES), 'scooter keys leaked into the exported report');
+  assert.strictEqual(report.fields.find((f) => f.name === 'db_sn').value, '<hidden>');
+  assert.strictEqual(report.fields.find((f) => f.name === 'bms_soc_rt').value, 59);
+  app.w.close();
+});
+
+test('Diagnostics E2E: preview shows the same redacted report in a read-only box', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  app.$('scanBtn').click();
+  await scanDone(app);
+  app.$('previewDiagBtn').click();
+  const box = app.$('diagPreview');
+  assert.strictEqual(box.style.display, 'block');
+  assert.ok(box.readOnly);
+  assert.doesNotThrow(() => JSON.parse(box.value));
+  assert.ok(!box.value.includes(SERIAL));
+  app.$('previewDiagBtn').click();
+  assert.strictEqual(box.style.display, 'none');
+  app.w.close();
+});
+
+test('Diagnostics E2E: a scan can be cancelled and still shows partial results', async () => {
+  const app = bootApp({ extraFields: diagExtras() });
+  await openDiagnostics(app);
+  app.$('scanBtn').click();
+  await wait(150);
+  app.$('cancelScanBtn').click();
+  await until(() => /cancelled/i.test(app.$('diagStatus').textContent) && app.$('scanBtn').disabled === false, 'the scan to cancel', 10000);
+  assert.match(app.$('diagSummary').textContent, /not run/);
   app.w.close();
 });
 

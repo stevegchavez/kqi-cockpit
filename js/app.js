@@ -7,7 +7,7 @@
  * reads status from the scooter; it has no controls that change it.
  */
 (function () {
-  const ble = new NIU.BLEManager();
+  const ble = new NIU.BLEManager({ catalogue: NIU.Fields });
   const geo = new NIU.GeoTracker();
   const store = new NIU.RideStore();
   // Battery history has its own IndexedDB; if storage is blocked the cockpit still works without it.
@@ -478,6 +478,18 @@
     state.lastBatterySample = null;
     renderBatteryScreen();
     showToast('Battery history cleared.');
+  });
+
+  // ---------- Diagnostics (read-only field explorer) ----------
+  NIU.DiagUI.init({
+    ble,
+    showToast,
+    exportFile,
+    getMeta: () => ({
+      name: ble.device ? ble.device.name : null,
+      bleVersion: 10,
+      dashboardVersion: state.scooter.dashboardVersion || null,
+    }),
   });
 
   // ---------- Setup: scooter keys ----------
