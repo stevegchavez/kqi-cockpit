@@ -10,6 +10,9 @@
   const ble = new NIU.BLEManager();
   const geo = new NIU.GeoTracker();
   const store = new NIU.RideStore();
+  // Battery history has its own IndexedDB; if storage is blocked the cockpit still works without it.
+  let battery = null;
+  try { battery = new NIU.Battery.BatteryStore(); } catch { battery = null; }
 
   // Cosmetic scale for the gauge only — does not gate or validate real
   // telemetry. Starts at a KQi-ish default and follows the scooter's own
@@ -23,6 +26,11 @@
   const state = {
     unit: localStorage.getItem('niu.unit') || 'mph', // display preference only, not ride data
     scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null },
+    rides: [],                 // cached saved rides, for the range estimate
+    haveBattery: false,        // true once a REAL battery reading has arrived this connection
+    lastBatterySample: null,
+    rideStartSOC: null,
+    rideSimulated: false,
     isRiding: false,
     rideStart: null,
     topSpeedKPH: 0,
@@ -50,6 +58,7 @@
   const powerVal = el('powerVal');
   const maxSpeedVal = el('maxSpeedVal');
   const cyclesVal = el('cyclesVal');
+  const rangeLine = el('rangeLine');
   const keysInput = el('keysInput');
   const keysStatus = el('keysStatus');
   const rideBtn = el('rideBtn');
@@ -166,15 +175,19 @@
   });
 
   ble.addEventListener('connected', (e) => {
+    // Forget values from a previous connection or from demo mode; fresh reads fill these in.
+    Object.assign(state.scooter, { batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null });
     statusLabel.textContent = e.detail.name || 'Scooter connected';
     playIgnitionSequence();
   });
 
-  ble.addEventListener('telemetry', (e) => applyTelemetry(e.detail));
+  ble.addEventListener('telemetry', (e) => applyTelemetry(e.detail, { simulated: false }));
   ble.addEventListener('error', (e) => showToast(e.detail.message));
   ble.addEventListener('disconnected', () => {
     state.scooter.poweredOn = null;
+    state.haveBattery = false;
     renderInfoStrip();
+    updateRange();
   });
 
   connectBtn.addEventListener('click', async () => {
@@ -188,8 +201,11 @@
     catch (err) { showToast(err.message); }
   });
 
-  function applyTelemetry(t) {
+  function applyTelemetry(t, opts) {
+    const simulated = !!(opts && opts.simulated);
     Object.assign(state.scooter, t);
+    if (simulated && state.isRiding) state.rideSimulated = true;
+    if (!simulated && t.batterySOC !== undefined) state.haveBattery = true;
     if (t.speedKPH !== undefined) {
       speedValue.textContent = Math.round(kphToDisplay(t.speedKPH));
       setGaugePercent(t.speedKPH / gaugeMaxKph);
@@ -208,6 +224,49 @@
     }
     if (t.maxSpeedKPH) gaugeMaxKph = Math.max(10, Math.ceil(t.maxSpeedKPH * 1.1));
     renderInfoStrip();
+    if (!simulated) recordBattery();
+    if (t.batterySOC !== undefined) updateRange();
+  }
+
+  /** Appends a battery-history sample when the rules say it is worth keeping. Never in demo mode. */
+  function recordBattery() {
+    if (!battery || !state.haveBattery || state.demoTimer) return;
+    const s = state.scooter;
+    const sample = { t: Date.now(), soc: s.batterySOC };
+    if (s.batteryHealth != null) sample.soh = s.batteryHealth;
+    if (s.chargeCycles != null) sample.cycles = s.chargeCycles;
+    if (s.poweredOn != null) sample.on = s.poweredOn;
+    if (!NIU.Battery.shouldRecord(state.lastBatterySample, sample)) return;
+    state.lastBatterySample = sample;
+    battery.add(sample)
+      .then(() => { if (el('batteryScreen').classList.contains('active')) renderBatteryScreen(); })
+      .catch(() => { /* history is a bonus; never break the cockpit over it */ });
+  }
+
+  /** "About X left", learned from your own real rides. */
+  function updateRange() {
+    const est = NIU.Insights.rangeEstimate(state.rides, state.haveBattery ? state.scooter.batterySOC : null);
+    if (!est) {
+      rangeLine.textContent = 'Range estimate appears after a few rides with the scooter connected.';
+      return;
+    }
+    const perPct = state.unit === 'mph' ? est.milesPerPct : est.milesPerPct * 1.609344;
+    const basis = `${est.confidence === 'good' ? '' : 'rough, '}from ${est.rides} ride${est.rides === 1 ? '' : 's'}`;
+    if (est.miles === null) {
+      rangeLine.textContent = `Typically ${perPct.toFixed(2)} ${distanceUnitLabel()} per 1% battery (${basis}).`;
+      return;
+    }
+    const left = state.unit === 'mph' ? est.miles : est.miles * 1.609344;
+    rangeLine.innerHTML = `\u2248 <b>${left.toFixed(1)} ${distanceUnitLabel()}</b> left \u00b7 ${basis}`;
+  }
+
+  /** Hands text to the share sheet / download / clipboard and tells the rider which happened. */
+  async function exportFile(prefix, ext, mime, text, t) {
+    try {
+      const how = await NIU.Exporters.deliver(NIU.Exporters.filenameFor(prefix, t, ext), mime, text);
+      if (how === 'clipboard') showToast('Copied to the clipboard.');
+      else if (how === 'download') showToast('Downloaded.');
+    } catch (err) { showToast(err.message); }
   }
 
   /** Battery health, power state and max speed — all read from the scooter. */
@@ -228,6 +287,7 @@
     el('tripTopLabel').textContent = `Top ${state.unit}`;
     el('maxSpeedLabel').textContent = `Max ${state.unit}`;
     renderInfoStrip();
+    updateRange();
   }
   unitToggle.addEventListener('click', () => {
     state.unit = state.unit === 'mph' ? 'kph' : 'mph';
@@ -244,6 +304,8 @@
     state.rideStart = Date.now();
     state.topSpeedKPH = 0;
     state.speedSamples = [];
+    state.rideSimulated = !!state.demoTimer;
+    state.rideStartSOC = state.haveBattery && !state.demoTimer ? state.scooter.batterySOC : null;
     rideBtn.textContent = 'FINISH RIDE';
     rideBtn.classList.add('riding');
     requestWakeLock();
@@ -278,6 +340,10 @@
       averageSpeedKPH: avgSpeedKPH,
       activeRidingSeconds: (endDate - state.rideStart) / 1000,
       points,
+      // Battery at the start and end, for efficiency and the range estimate. Null when unknown.
+      startSOC: state.rideStartSOC,
+      endSOC: state.haveBattery && !state.rideSimulated ? state.scooter.batterySOC : null,
+      simulated: state.rideSimulated,
     };
 
     await store.saveRide(ride);
@@ -309,7 +375,7 @@
     state.demoTimer = setInterval(() => {
       t += 0.3;
       const speedKPH = Math.max(0, 18 + 12 * Math.sin(t));
-      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0, batteryHealth: 93, poweredOn: true, maxSpeedKPH: 30, chargeCycles: 151 });
+      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0, batteryHealth: 93, poweredOn: true, maxSpeedKPH: 30, chargeCycles: 151 }, { simulated: true });
     }, 400);
   });
 
@@ -319,9 +385,99 @@
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
     el(target).classList.add('active');
     if (target === 'ridesScreen') renderRidesList();
+    if (target === 'batteryScreen') renderBatteryScreen();
   }
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => showTab(btn.dataset.target));
+  });
+
+  // ---------- Battery history screen ----------
+  const dayLabel = (x) => new Date(x).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const chartOrEmpty = (box, svg, msg) => { box.innerHTML = svg || `<div class="empty">${msg}</div>`; };
+
+  async function renderBatteryScreen() {
+    let samples = [];
+    if (battery) { try { samples = await battery.all(); } catch { samples = []; } }
+    el('batteryEmpty').style.display = samples.length ? 'none' : 'block';
+    el('batteryBody').style.display = samples.length ? 'block' : 'none';
+    if (!samples.length) return;
+
+    const latest = (field) => {
+      for (let i = samples.length - 1; i >= 0; i--) if (typeof samples[i][field] === 'number') return samples[i][field];
+      return null;
+    };
+    const soh = latest('soh');
+    const cycles = latest('cycles');
+    const charges = NIU.Battery.inferCharges(samples);
+    el('bHealth').textContent = soh === null ? '\u2013' : `${soh}%`;
+    el('bCycles').textContent = cycles === null ? '\u2013' : String(cycles);
+    el('bCharges').textContent = String(charges.length);
+
+    const weekAgo = Date.now() - 7 * 86400000;
+    const week = samples.filter((s) => s.t >= weekAgo).map((s) => ({ x: s.t, y: s.soc }));
+    chartOrEmpty(el('socChart'),
+      NIU.Charts.lineChart(week, { yMin: 0, yMax: 100, unit: '%', label: 'Battery level over the last 7 days', xFormat: dayLabel }),
+      'No readings in the last 7 days.');
+    chartOrEmpty(el('healthChart'),
+      NIU.Charts.lineChart(NIU.Battery.dailySeries(samples, 'soh'), { unit: '%', label: 'Battery health by day', xFormat: dayLabel }),
+      'No health readings yet.');
+
+    const trend = NIU.Battery.healthTrend(samples);
+    let trendText = 'Not enough data for a health trend yet: it needs at least 3 days and about 10 more charge cycles.';
+    if (trend) {
+      const observed = trend.fromHealth === trend.toHealth
+        ? `Health has held at ${trend.toHealth}%`
+        : `Health went from ${trend.fromHealth}% to ${trend.toHealth}%`;
+      trendText = `${observed} over ${trend.days} days and ${trend.spanCycles} charge cycles.`;
+      if (trend.extrapolate && trend.perHundredCycles !== 0) {
+        const dir = trend.perHundredCycles < 0 ? 'losing' : 'gaining';
+        trendText += ` That is roughly ${dir} ${Math.abs(trend.perHundredCycles).toFixed(1)}% per 100 cycles.`;
+      }
+      trendText += ' Health is a whole number, so treat this as rough.';
+    }
+    el('healthTrend').textContent = trendText;
+
+    const list = el('chargesList');
+    list.innerHTML = '';
+    const recent = charges.slice(-5).reverse();
+    if (!recent.length) {
+      const li = document.createElement('li');
+      li.className = 'none';
+      li.textContent = 'No charges seen yet.';
+      list.appendChild(li);
+    }
+    for (const c of recent) {
+      const li = document.createElement('li');
+      const a = document.createElement('span');
+      a.textContent = new Date(c.to).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const b = document.createElement('span');
+      b.textContent = `${c.fromSOC}% \u2192 ${c.toSOC}%`;
+      li.append(a, b);
+      list.appendChild(li);
+    }
+  }
+
+  el('exportBatteryBtn').addEventListener('click', async () => {
+    if (!battery) return;
+    try { exportFile('niu-battery', 'csv', 'text/csv', NIU.Exporters.batteryCSV(await battery.all()), Date.now()); }
+    catch { showToast('Could not read the battery history.'); }
+  });
+  // Two taps to delete, so a stray touch can't wipe the history.
+  let clearArmed = null;
+  el('clearBatteryBtn').addEventListener('click', async () => {
+    const btn = el('clearBatteryBtn');
+    if (!clearArmed) {
+      btn.textContent = 'Tap again to delete';
+      clearArmed = setTimeout(() => { clearArmed = null; btn.textContent = 'Clear history'; }, 4000);
+      return;
+    }
+    clearTimeout(clearArmed);
+    clearArmed = null;
+    btn.textContent = 'Clear history';
+    try { if (battery) await battery.clear(); } catch { /* nothing to clear */ }
+    state.lastBatterySample = null;
+    renderBatteryScreen();
+    showToast('Battery history cleared.');
   });
 
   // ---------- Setup: scooter keys ----------
@@ -383,8 +539,15 @@
   }
 
   // ---------- Rides list ----------
+  el('exportAllBtn').addEventListener('click', () => {
+    exportFile('niu-rides', 'csv', 'text/csv', NIU.Exporters.ridesSummaryCSV(state.rides), Date.now());
+  });
+
   async function renderRidesList() {
     const rides = await store.getAllRides();
+    state.rides = rides;
+    updateRange();
+    el('exportAllBtn').style.display = rides.length ? 'inline-block' : 'none';
     ridesList.innerHTML = '';
     emptyState.style.display = rides.length ? 'none' : 'block';
 
@@ -420,7 +583,49 @@
 
   // ---------- Ride detail (Leaflet map) ----------
   let detailMap = null;
+  let detailRide = null;
+
+  const toUnitDistance = (miles) => (state.unit === 'mph' ? miles : miles * 1.609344);
+  const toUnitHeight = (meters) => (state.unit === 'mph' ? `${Math.round(meters * 3.28084)} ft` : `${Math.round(meters)} m`);
+
+  /** Facts about one ride, built with textContent so recorded data can never inject markup. */
+  function renderInsights(ride) {
+    const s = NIU.Insights.rideStats(ride);
+    const rows = [];
+    if (ride.simulated) rows.push(['Note', 'Simulated ride (demo mode)']);
+    if (s.movingSeconds || s.stoppedSeconds) rows.push(['Moving / stopped', `${formatDuration(s.movingSeconds)} / ${formatDuration(s.stoppedSeconds)}`]);
+    if (s.avgMovingKph != null) rows.push(['Avg moving speed', `${Math.round(kphToDisplay(s.avgMovingKph))} ${state.unit}`]);
+    if (s.scooterTopKph != null || s.gpsMaxKph != null) {
+      const parts = [];
+      if (s.scooterTopKph != null) parts.push(`scooter ${Math.round(kphToDisplay(s.scooterTopKph))}`);
+      if (s.gpsMaxKph != null) parts.push(`GPS ${Math.round(kphToDisplay(s.gpsMaxKph))}`);
+      rows.push(['Top speed', `${parts.join(' \u00b7 ')} ${state.unit}`]);
+    }
+    if (s.batteryUsedPct != null) rows.push(['Battery used', `${s.batteryUsedPct}% (${ride.startSOC}% \u2192 ${ride.endSOC}%)`]);
+    if (s.milesPerPct != null) rows.push(['Efficiency', `${toUnitDistance(s.milesPerPct).toFixed(2)} ${distanceUnitLabel()} per 1%`]);
+    if (s.elevation) rows.push(['Elevation', `\u2191 ${toUnitHeight(s.elevation.gainMeters)}  \u2193 ${toUnitHeight(s.elevation.lossMeters)}`]);
+    const list = el('detailInsights');
+    list.innerHTML = '';
+    for (const [k, v] of rows) {
+      const li = document.createElement('li');
+      const a = document.createElement('span'); a.textContent = k;
+      const b = document.createElement('span'); b.textContent = v;
+      li.append(a, b);
+      list.appendChild(li);
+    }
+  }
+  el('legendBar').style.background = `linear-gradient(to right, ${NIU.Insights.SPEED_RAMP.join(', ')})`;
+
+  el('exportGpxBtn').addEventListener('click', () => {
+    if (detailRide) exportFile('niu-ride', 'gpx', 'application/gpx+xml', NIU.Exporters.toGPX(detailRide), detailRide.startDate);
+  });
+  el('exportCsvBtn').addEventListener('click', () => {
+    if (detailRide) exportFile('niu-ride', 'csv', 'text/csv', NIU.Exporters.toRideCSV(detailRide), detailRide.startDate);
+  });
+
   function openRideDetail(ride) {
+    detailRide = ride;
+    renderInsights(ride);
     el('rideDetail').classList.add('active');
     el('detailDate').textContent = new Date(ride.startDate).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -439,10 +644,16 @@
 
     if (ride.points && ride.points.length > 1) {
       const latlngs = ride.points.map((p) => [p.lat, p.lon]);
-      const polyline = L.polyline(latlngs, { color: '#ffb020', weight: 5 }).addTo(detailMap);
+      // Colour each stretch of the route by speed (relative to the scooter's own top speed).
+      const route = NIU.Insights.colouredRoute(ride.points, state.scooter.maxSpeedKPH || 30);
+      if (route.length) {
+        for (const seg of route) L.polyline(seg.latlngs, { color: seg.color, weight: 5, opacity: 0.95 }).addTo(detailMap);
+      } else {
+        L.polyline(latlngs, { color: '#ffb020', weight: 5 }).addTo(detailMap);
+      }
       L.circleMarker(latlngs[0], { radius: 6, color: '#ffb020', fillOpacity: 1 }).addTo(detailMap);
       L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#ff4438', fillOpacity: 1 }).addTo(detailMap);
-      detailMap.fitBounds(polyline.getBounds(), { padding: [30, 30] });
+      detailMap.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
     } else {
       detailMap.setView([33.77, -118.19], 12); // fallback view if no GPS track was captured
     }
@@ -466,6 +677,8 @@
   refreshUnitLabels();
   renderCellStrip(0);
   refreshKeysStatus();
+  // Pick up where the last session left off so the 10-minute heartbeat rule spans app restarts.
+  if (battery) battery.last().then((s) => { if (!state.lastBatterySample) state.lastBatterySample = s; }).catch(() => {});
 
   if (!ble.isSupported) {
     dot.className = 'dot unsupported';

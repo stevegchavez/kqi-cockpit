@@ -20,60 +20,7 @@ const queue = [];
 function test(name, fn) { queue.push({ name, fn }); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-class FakeChar extends EventTarget {
-  constructor() { super(); this.value = null; this.notifying = false; }
-  async startNotifications() { this.notifying = true; return this; }
-  emit(bytes) {
-    // Hand out a DataView over a larger buffer with a non-zero offset, as real stacks may.
-    const backing = new Uint8Array(bytes.length + 7);
-    backing.set(bytes, 3);
-    this.value = new DataView(backing.buffer, 3, bytes.length);
-    const ev = new Event('characteristicvaluechanged');
-    Object.defineProperty(ev, 'target', { value: this });
-    this.dispatchEvent(ev);
-  }
-}
-
-function fakeBluetooth(scooter, { serviceUuid = C.PRIMARY_SERVICE_UUID, cancel = false, noWithResponse = false } = {}) {
-  const suffix = serviceUuid.slice(-1);
-  const notifyChar = new FakeChar();
-  const writeChar = new FakeChar();
-  const written = [];
-  const doWrite = async (bytes) => {
-    written.push(Buffer.from(bytes).toString('hex'));
-    const replies = scooter.receive(Buffer.from(bytes));
-    setImmediate(() => { for (const r of replies) notifyChar.emit(new Uint8Array(r)); });
-  };
-  if (noWithResponse) writeChar.writeValue = doWrite; else writeChar.writeValueWithResponse = doWrite;
-
-  const service = {
-    async getCharacteristic(uuid) {
-      if (uuid === `8ec94e31-f315-4f60-9fb8-838830daea5${suffix}`) return notifyChar;
-      if (uuid === `8ec94e32-f315-4f60-9fb8-838830daea5${suffix}`) return writeChar;
-      throw Object.assign(new Error('no such characteristic'), { name: 'NotFoundError' });
-    },
-  };
-  const device = new EventTarget();
-  device.name = 'NIU KQi';
-  device.gatt = {
-    connected: false,
-    async connect() { this.connected = true; return {
-      async getPrimaryService(uuid) {
-        if (uuid === serviceUuid) return service;
-        throw Object.assign(new Error('Service not found'), { name: 'NotFoundError' });
-      } }; },
-    disconnect() { if (this.connected) { this.connected = false; device.dispatchEvent(new Event('gattserverdisconnected')); } },
-  };
-  const calls = [];
-  const bluetooth = {
-    async requestDevice(opts) {
-      calls.push(opts);
-      if (cancel) throw Object.assign(new Error('User cancelled the requestDevice() chooser.'), { name: 'NotFoundError' });
-      return device;
-    },
-  };
-  return { bluetooth, device, calls, written, notifyChar };
-}
+const { fakeBluetooth } = require('./helpers/fake-bluetooth.js');
 
 function setup(o = {}) {
   const scooter = new FakeScooter({ password: PWD, aesKey: AES, fields: defaultFields(), refuse: o.refuse || [] });
