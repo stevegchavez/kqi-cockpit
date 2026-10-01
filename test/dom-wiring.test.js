@@ -141,7 +141,7 @@ test('every script the page loads exists, and every module the tests load is on 
   for (const f of files) assert.ok(html.includes(`js/${f}`), `index.html must load js/${f}`);
 });
 
-test('info strip shows battery health, power state and max speed after (simulated) telemetry', async () => {
+test('info strip shows battery health, power state, max speed and charge cycles after (simulated) telemetry', async () => {
   const d = window.document;
   d.getElementById('demoToggleBtn').click();
   await new Promise((resolve) => window.setTimeout(resolve, 700));
@@ -151,6 +151,7 @@ test('info strip shows battery health, power state and max speed after (simulate
   const unit = d.getElementById('speedUnit').textContent;
   const expected = unit === 'MPH' ? '19' : '30';   // 30 km/h
   assert.strictEqual(d.getElementById('maxSpeedVal').textContent, expected);
+  assert.strictEqual(d.getElementById('cyclesVal').textContent, '151');
   d.getElementById('demoToggleBtn').click();       // stop the interval
 });
 

@@ -35,7 +35,7 @@ out["hs1RejectFrame"] = rej + P.checksum(rej)
 # reads
 groups = {
     "fast": ["foc_k_rt_speed", "bms_soc_rt", "db_k_realtime_status", "db_k_f_code", "bms_soh_rt"],
-    "static": ["foc_k_max_speed", "bms_rated_vlt", "db_k_sw_ver"],
+    "static": ["foc_k_max_speed", "bms_rated_vlt", "db_k_sw_ver", "bms_c_cont"],
     "long": ["db_k_sw_ver", "foc_k_s_ver", "bms_s_ver_n"],   # 24 bytes -> two reply frames
 }
 out["reads"] = {}
@@ -50,7 +50,7 @@ def reply_frames(names, values_hex, key):
 fast_hex = "007b" + "3b" + "00420001" + "00" + "5d"
 out["reads"]["fast"]["replyFrames"] = reply_frames(groups["fast"], fast_hex, AES)
 out["reads"]["fast"]["expected"] = P.parse_read_frames(out["reads"]["fast"]["replyFrames"], groups["fast"], AES)
-static_hex = "012c" + "30" + "4b32433246563332"       # max 300, 48 V, "K2C2FV32"
+static_hex = "012c" + "30" + "4b32433246563332" + "0097"   # max 300, 48 V, "K2C2FV32", 151 cycles
 out["reads"]["static"]["replyFrames"] = reply_frames(groups["static"], static_hex, AES)
 out["reads"]["static"]["expected"] = P.parse_read_frames(out["reads"]["static"]["replyFrames"], groups["static"], AES)
 long_hex = "4b32433246563332" + "4b44453133473037" + "4b33443636563032"

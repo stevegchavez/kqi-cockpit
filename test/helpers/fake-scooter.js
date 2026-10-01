@@ -113,6 +113,7 @@ function defaultFields() {
     '31001C': { len: 1, value: 59 },            // bms_soc_rt
     '31004C': { len: 1, value: 93 },            // bms_soh_rt
     '310016': { len: 1, value: 48 },            // bms_rated_vlt
+    '310018': { len: 2, value: 151 },           // bms_c_cont: charge cycles
     '31003C': { len: 8, text: 'K3D66V02' },     // bms_s_ver_n
     '110004': { len: 4, value: 4325377 },       // db_k_realtime_status (powered on)
     '110006': { len: 1, value: 0 },             // db_k_f_code

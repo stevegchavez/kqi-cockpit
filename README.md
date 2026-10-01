@@ -11,8 +11,8 @@ records rides (GPS route, distance, top/average speed) on-device.
 
 ## What it does and doesn't do
 
-- **Reads** status from the scooter over Bluetooth: speed, battery %, battery health, powered
-  on/off, fault code, top speed, rated voltage.
+- **Reads** status from the scooter over Bluetooth: speed, battery %, battery health, charge
+  cycle count, powered on/off, fault code, top speed, rated voltage.
 - **Never writes.** There are no lock, headlight, mode or setting controls, and the protocol
   module has no command builders — a test fails if one is ever added. (The NIU protocol has
   no headlight on/off command anyway.)

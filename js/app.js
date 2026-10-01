@@ -22,7 +22,7 @@
 
   const state = {
     unit: localStorage.getItem('niu.unit') || 'mph', // display preference only, not ride data
-    scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null },
+    scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null },
     isRiding: false,
     rideStart: null,
     topSpeedKPH: 0,
@@ -49,6 +49,7 @@
   const healthVal = el('healthVal');
   const powerVal = el('powerVal');
   const maxSpeedVal = el('maxSpeedVal');
+  const cyclesVal = el('cyclesVal');
   const keysInput = el('keysInput');
   const keysStatus = el('keysStatus');
   const rideBtn = el('rideBtn');
@@ -216,6 +217,7 @@
     powerVal.textContent = s.poweredOn == null ? '\u2013' : (s.poweredOn ? 'ON' : 'OFF');
     powerVal.className = 'v ' + (s.poweredOn == null ? 'off' : (s.poweredOn ? 'on' : 'off'));
     maxSpeedVal.textContent = s.maxSpeedKPH == null ? '\u2013' : Math.round(kphToDisplay(s.maxSpeedKPH));
+    cyclesVal.textContent = s.chargeCycles == null ? '\u2013' : String(s.chargeCycles);
   }
 
   // ---------- Unit toggle ----------
@@ -307,7 +309,7 @@
     state.demoTimer = setInterval(() => {
       t += 0.3;
       const speedKPH = Math.max(0, 18 + 12 * Math.sin(t));
-      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0, batteryHealth: 93, poweredOn: true, maxSpeedKPH: 30 });
+      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0, batteryHealth: 93, poweredOn: true, maxSpeedKPH: 30, chargeCycles: 151 });
     }, 400);
   });
 

@@ -64,10 +64,10 @@ test('readStatus returns dashboard telemetry from the fast group', async () => {
   assert.deepStrictEqual(t, { speedKPH: 12.3, batterySOC: 59, poweredOn: true, faultFlags: 0, batteryHealth: 93 });
 });
 
-test('readStatic returns max speed, rated voltage and firmware', async () => {
+test('readStatic returns max speed, rated voltage, firmware and charge cycles', async () => {
   const { session } = link();
   await session.handshake();
-  assert.deepStrictEqual(await session.readStatic(), { maxSpeedKPH: 30, ratedVoltage: 48, dashboardVersion: 'K2C2FV32' });
+  assert.deepStrictEqual(await session.readStatic(), { maxSpeedKPH: 30, ratedVoltage: 48, dashboardVersion: 'K2C2FV32', chargeCycles: 151 });
 });
 
 test('a refused field falls back to one-by-one reads and is remembered as unsupported', async () => {
