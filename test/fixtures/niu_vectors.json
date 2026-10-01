@@ -69,6 +69,7 @@
   },
   "static": {
    "expected": {
+    "bms_c_cont": 151,
     "bms_rated_vlt": 48,
     "db_k_sw_ver": "K2C2FV32",
     "foc_k_max_speed": 300
@@ -76,16 +77,17 @@
    "names": [
     "foc_k_max_speed",
     "bms_rated_vlt",
-    "db_k_sw_ver"
+    "db_k_sw_ver",
+    "bms_c_cont"
    ],
    "replyFrames": [
-    "01a100395cce454b08675703d993745cf8276922"
+    "01a100b5ace6fafa4c4bcc3d96ccf78332973e60"
    ],
    "request": [
-    "012100dda79e0dc21c148129018fcda3abfab143"
+    "0121002e2f99bcfb80e1e5649abb6f8035bd5807"
    ],
    "requestHex32Key": [
-    "012100ae1484ce8617ce101dc40eaf66368e39b2"
+    "0121001e8bb5eaa68840476d2c8b15de4d2c8635"
    ]
   }
  },

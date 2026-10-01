@@ -145,6 +145,7 @@ test('interpretStatus turns the live-style reply into dashboard telemetry', () =
   assert.strictEqual(s.maxSpeedKPH, 30);
   assert.strictEqual(s.ratedVoltage, 48);
   assert.strictEqual(s.dashboardVersion, 'K2C2FV32');
+  assert.strictEqual(s.chargeCycles, 151);
 });
 
 test('interpretStatus only returns keys it was given, and caps percentages at 100', () => {

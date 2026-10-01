@@ -21,7 +21,7 @@
   // What the dashboard polls. Both groups only contain fields that were read
   // successfully on a real KQi 200F; each fits in a single 16-byte request block.
   const FAST_GROUP = ['foc_k_rt_speed', 'bms_soc_rt', 'db_k_realtime_status', 'db_k_f_code', 'bms_soh_rt'];
-  const STATIC_GROUP = ['foc_k_max_speed', 'bms_rated_vlt', 'db_k_sw_ver'];
+  const STATIC_GROUP = ['foc_k_max_speed', 'bms_rated_vlt', 'db_k_sw_ver', 'bms_c_cont'];
 
   const MAX_PARKED = 50;
 

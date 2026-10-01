@@ -122,6 +122,7 @@
     bms_soc_rt:           { code: '31001C', len: 1, type: 'U8' },
     bms_soh_rt:           { code: '31004C', len: 1, type: 'U8' },
     bms_rated_vlt:        { code: '310016', len: 1, type: 'U8' },
+    bms_c_cont:           { code: '310018', len: 2, type: 'U16' },   // charge cycle count (confirmed on a 200F)
     bms_s_ver_n:          { code: '31003C', len: 8, type: 'UTF-8' },
     db_k_realtime_status: { code: '110004', len: 4, type: 'U32' },
     db_k_f_code:          { code: '110006', len: 1, type: 'U8' },
@@ -302,6 +303,7 @@
     if (v.db_k_f_code !== undefined) t.faultFlags = v.db_k_f_code;
     if (v.foc_k_max_speed !== undefined) t.maxSpeedKPH = v.foc_k_max_speed / 10;
     if (v.bms_rated_vlt !== undefined) t.ratedVoltage = v.bms_rated_vlt;
+    if (v.bms_c_cont !== undefined) t.chargeCycles = v.bms_c_cont;
     if (v.db_k_sw_ver !== undefined) t.dashboardVersion = v.db_k_sw_ver;
     return t;
   }
