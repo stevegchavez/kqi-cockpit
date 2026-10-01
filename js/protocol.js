@@ -129,39 +129,87 @@
     db_k_sw_ver:          { code: '110002', len: 8, type: 'UTF-8' },
   };
 
-  function field(name) {
-    const spec = FIELDS[name];
+  /** `table` defaults to the dashboard's small verified set; Diagnostics passes the full catalogue. */
+  function field(name, table) {
+    const spec = (table || FIELDS)[name];
     if (!spec) throw new NiuError(`unknown or unsupported field ${name}`);
     return spec;
   }
 
+  /** Decodes one field's bytes. Integers are big-endian; HEX fields come back as a lower-case hex string. */
   function decodeValue(spec, bytes) {
-    if (spec.type === 'U8' || spec.type === 'U16' || spec.type === 'U32') {
+    const t = spec.type;
+    if (t === 'U8' || t === 'U16' || t === 'U32') {
       let v = 0;
       for (const b of bytes) v = v * 256 + b;
       return v;
     }
-    if (spec.type === 'UTF-8') {
+    if (t === 'S8' || t === 'S16' || t === 'S32') {
+      let v = 0;
+      for (const b of bytes) v = v * 256 + b;
+      const bits = bytes.length * 8;
+      return v >= Math.pow(2, bits - 1) ? v - Math.pow(2, bits) : v;
+    }
+    if (t === 'UTF-8' || t === 'US-ASCII') {
       let end = bytes.length;
       while (end > 0 && bytes[end - 1] === 0) end--;
       const trimmed = bytes.subarray(0, end);
       if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(trimmed);
       return String.fromCharCode.apply(null, Array.from(trimmed));
     }
-    throw new NiuError(`unsupported field type ${spec.type}`);
+    if (t === 'HEX') return toHex(bytes);
+    if (t === 'F32' || t === 'F64') {
+      const size = t === 'F32' ? 4 : 8;
+      if (bytes.length !== size) throw new NiuError(`${t} field must be ${size} bytes`);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, size);
+      return size === 4 ? view.getFloat32(0, false) : view.getFloat64(0, false);
+    }
+    throw new NiuError(`unsupported field type ${t}`);
   }
 
   /** Values laid out back-to-back in request order. */
-  function parseFieldsSequential(data, names) {
-    const out = {};
+  function parseFieldsSequential(data, names, table) {
+    return parseFieldsDetailed(data, names, table).values;
+  }
+
+  /** Like parseFieldsSequential, but also returns each field's raw bytes as hex. */
+  function parseFieldsDetailed(data, names, table) {
+    const values = {};
+    const raws = {};
     let pos = 0;
     for (const name of names) {
-      const spec = field(name);
+      const spec = field(name, table);
       const end = pos + spec.len;
       if (end > data.length) {
         throw new NiuError(`reply too short for ${name} (got ${data.length} bytes)`);
       }
-      out[name] = decodeValue(spec, data.subarray(pos, end));
+      const bytes = data.subarray(pos, end);
+      values[name] = decodeValue(spec, bytes);
+      raws[name] = toHex(bytes);
+      pos = end;
+    }
+    return { values, raws };
+  }
+
+  /**
+   * Splits a pushed (unsolicited) payload of code(3 bytes)+value pairs into named values.
+   * Codes not in `byCode` stop the parse and are returned as raw hex under code_XXXXXX.
+   * @param {Uint8Array} data
+   * @param {Object<string,string>} byCode code -> field name
+   * @param {Object<string,{len:number,type:string}>} table
+   */
+  function parseFieldsCoded(data, byCode, table) {
+    const out = {};
+    let pos = 0;
+    while (pos + 3 <= data.length) {
+      const code = toHex(data.subarray(pos, pos + 3)).toUpperCase();
+      if (code === '000000') break;                       // zero padding at the end of the block
+      const name = byCode[code];
+      if (!name) { out[`code_${code}`] = toHex(data.subarray(pos + 3)); break; }
+      const spec = table[name];
+      const end = pos + 3 + spec.len;
+      if (end > data.length) break;
+      out[name] = decodeValue(spec, data.subarray(pos + 3, end));
       pos = end;
     }
     return out;
@@ -185,8 +233,8 @@
   }
 
   /** Request frames asking the scooter for the named fields. */
-  function buildRead(names, key) {
-    const data = concat(...names.map((n) => fromHex(field(n).code)));
+  function buildRead(names, key, table) {
+    const data = concat(...names.map((n) => fromHex(field(n, table).code)));
     return buildChunked(C.HEADERS.READ[0], C.HEADERS.READ[1], data, key);
   }
 
@@ -204,7 +252,12 @@
   }
 
   /** Reassembles a read reply and splits it into named values. */
-  function parseReadFrames(frames, names, key) {
+  function parseReadFrames(frames, names, key, table) {
+    return parseReadFramesDetailed(frames, names, key, table).values;
+  }
+
+  /** Reassembles a read reply into {values, raws} (decoded values and their raw hex). */
+  function parseReadFramesDetailed(frames, names, key, table) {
     const k = keyBytes(key);
     let receivable = 0;
     let actual = 0;
@@ -229,7 +282,16 @@
     if (receivable !== actual) {
       throw new NiuError(`frame loss: expected ${receivable} data frames, got ${actual}`);
     }
-    return parseFieldsSequential(concat(...chunks), names);
+    return parseFieldsDetailed(concat(...chunks), names, table);
+  }
+
+  /**
+   * Decodes an unsolicited ("push") frame: one encrypted block of code+value pairs.
+   * @returns {Object} named values (and code_XXXXXX for codes outside the catalogue)
+   */
+  function parsePush(frame, key, byCode, table) {
+    if (frame.length !== C.FRAME_LENGTH || !checksumOk(frame)) throw new NiuError('bad checksum in push frame');
+    return parseFieldsCoded(decBlock(keyBytes(key), frame.slice(3, 19)), byCode, table);
   }
 
   /** The scooter may deliver several 20-byte frames in one notification. */
@@ -311,7 +373,8 @@
   return {
     NiuError, FIELDS,
     toHex, fromHex, concat, checksum, checksumOk, keyBytes,
-    buildRead, parseReadFrames, isLastReadFrame, isReadError, splitNotification,
+    buildRead, parseReadFrames, parseReadFramesDetailed, isLastReadFrame, isReadError, splitNotification,
+    parseFieldsCoded, parseFieldsDetailed, parsePush,
     handshake1, parseHandshake1Reply, handshake2, parseHandshake2Reply,
     interpretStatus, decodeValue,
   };

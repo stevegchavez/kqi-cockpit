@@ -4,7 +4,7 @@
   "description": "Privacy-first, read-only Web Bluetooth companion dashboard for the NIU KQi 200F.",
   "private": true,
   "scripts": {
-    "test": "node test/crypto.test.js && node test/protocol.test.js && node test/session.test.js && node test/ble.test.js && node test/keystore.test.js && node test/insights.test.js && node test/exporters.test.js && node test/battery.test.js && node test/geo.test.js && node test/dom-wiring.test.js",
+    "test": "node test/crypto.test.js && node test/fields.test.js && node test/protocol.test.js && node test/session.test.js && node test/ble.test.js && node test/keystore.test.js && node test/insights.test.js && node test/exporters.test.js && node test/battery.test.js && node test/diagnostics.test.js && node test/geo.test.js && node test/dom-wiring.test.js",
     "serve": "python3 -m http.server 8080"
   },
   "devDependencies": {

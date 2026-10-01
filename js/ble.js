@@ -40,14 +40,16 @@
 
   class BLEManager extends EventTarget {
     /**
-     * @param {{bluetooth?: object, pollIntervalMs?: number, timeoutMs?: number}} [opts]
+     * @param {{bluetooth?: object, pollIntervalMs?: number, timeoutMs?: number, catalogue?: object}} [opts]
      *   `bluetooth` defaults to navigator.bluetooth; injectable for tests.
+     *   `catalogue` ({FIELDS, BY_CODE}) lets the session decode pushed frames for Diagnostics.
      */
     constructor(opts = {}) {
       super();
       this._bluetooth = opts.bluetooth || (typeof navigator !== 'undefined' ? navigator.bluetooth : undefined);
       this._pollIntervalMs = opts.pollIntervalMs || 1000;
       this._timeoutMs = opts.timeoutMs;
+      this._catalogue = opts.catalogue || null;
       this.device = null;
       this.session = null;
       this._notifyChar = null;
@@ -143,7 +145,7 @@
           ? writeChar.writeValueWithResponse(bytes)
           : writeChar.writeValue(bytes)),
       };
-      this.session = new Session(transport, { password: keys.password, aes: keys.aes, timeoutMs: this._timeoutMs });
+      this.session = new Session(transport, { password: keys.password, aes: keys.aes, timeoutMs: this._timeoutMs, catalogue: this._catalogue });
 
       this._notifyChar = notifyChar;
       this._onValue = (event) => {
@@ -158,6 +160,10 @@
 
       this._setState('connected');
       this.dispatchEvent(new CustomEvent('connected', { detail: { name: device.name } }));
+      this._startPolling();
+    }
+
+    _startPolling() {
       this.session.startPolling({
         intervalMs: this._pollIntervalMs,
         onTelemetry: (t) => this.dispatchEvent(new CustomEvent('telemetry', { detail: t })),
@@ -166,6 +172,22 @@
           this.disconnect();
         },
       });
+    }
+
+    /**
+     * Runs `fn(session)` with the dashboard's polling paused (so a scan and the polling don't
+     * compete for the link), then resumes polling if it was running and we're still connected.
+     */
+    async withPollingPaused(fn) {
+      const session = this.session;
+      if (!session || this.state !== 'connected') throw new Error('Not connected to a scooter.');
+      const wasPolling = session.isPolling;
+      session.stopPolling();
+      try {
+        return await fn(session);
+      } finally {
+        if (wasPolling && this.session === session && this.state === 'connected') this._startPolling();
+      }
     }
 
     disconnect() {

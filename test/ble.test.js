@@ -152,6 +152,60 @@ test('reconnect() reuses the same device without showing the picker again', asyn
   assert.strictEqual(mgr.state, 'disconnected');
 });
 
+test('withPollingPaused stops the dashboard polling during the work and resumes it afterwards', async () => {
+  const { mgr, events, fb } = setup();
+  await mgr.connect(KEYS);
+  await sleep(80);
+  let during = null;
+  const result = await mgr.withPollingPaused(async (session) => {
+    await sleep(40);                                   // let any in-flight poll finish
+    const before = fb.written.length;
+    const teleBefore = events.telemetry.length;
+    await sleep(120);
+    during = { writes: fb.written.length - before, telemetry: events.telemetry.length - teleBefore };
+    assert.ok(session, 'the work receives the live session');
+    return 'done';
+  });
+  assert.strictEqual(result, 'done');
+  assert.deepStrictEqual(during, { writes: 0, telemetry: 0 }, 'nothing may be polled while paused');
+  const n = events.telemetry.length;
+  await sleep(120);
+  assert.ok(events.telemetry.length > n, 'polling must resume afterwards');
+  mgr.disconnect();
+});
+
+test('withPollingPaused resumes polling even if the work throws, and passes the error on', async () => {
+  const { mgr, events } = setup();
+  await mgr.connect(KEYS);
+  await sleep(50);
+  await assert.rejects(() => mgr.withPollingPaused(async () => { throw new Error('scan blew up'); }), /scan blew up/);
+  const n = events.telemetry.length;
+  await sleep(120);
+  assert.ok(events.telemetry.length > n);
+  mgr.disconnect();
+});
+
+test('withPollingPaused refuses to run when there is no connection, and does not resume after a disconnect', async () => {
+  const { mgr, events } = setup();
+  await assert.rejects(() => mgr.withPollingPaused(async () => 1), /Not connected/);
+  await mgr.connect(KEYS);
+  await sleep(50);
+  await mgr.withPollingPaused(async () => { mgr.disconnect(); await sleep(20); });
+  const n = events.telemetry.length;
+  await sleep(120);
+  assert.strictEqual(events.telemetry.length, n, 'a disconnected link must not be polled');
+});
+
+test('the manager hands the field catalogue to the session so pushes can be decoded', async () => {
+  const Fields = require('../js/fields.js');
+  const scooter = new (require('./helpers/fake-scooter.js').FakeScooter)({ password: PWD, aesKey: AES, fields: require('./helpers/fake-scooter.js').defaultFields() });
+  const fb = fakeBluetooth(scooter);
+  const mgr = new BLEManager({ bluetooth: fb.bluetooth, pollIntervalMs: 15, timeoutMs: 80, catalogue: Fields });
+  await mgr.connect(KEYS);
+  assert.strictEqual(mgr.session.catalogue, Fields);
+  mgr.disconnect();
+});
+
 (async () => {
   for (const { name, fn } of queue) {
     try { await fn(); passed++; console.log(`  ok - ${name}`); }

@@ -40,7 +40,10 @@
   class Session {
     /**
      * @param {{write(frame: Uint8Array): Promise<void>}} transport
-     * @param {{password: string, aes: string, timeoutMs?: number, random?: (n:number)=>Uint8Array}} opts
+     * @param {{password: string, aes: string, timeoutMs?: number, random?: (n:number)=>Uint8Array,
+     *          fieldTable?: object, catalogue?: {FIELDS: object, BY_CODE: object}}} opts
+     *   fieldTable: which fields reads may name (default: the dashboard's small verified set).
+     *   catalogue: the full field catalogue, used only to decode pushed frames.
      */
     constructor(transport, opts) {
       this.transport = transport;
@@ -49,6 +52,8 @@
       P.keyBytes(this.password);          // fail fast on malformed keys
       P.keyBytes(this.aes);
       this.timeoutMs = opts.timeoutMs || C.RESPONSE_TIMEOUT_MS;
+      this.fieldTable = opts.fieldTable || P.FIELDS;
+      this.catalogue = opts.catalogue || null;
       this.random = opts.random || defaultRandom;
       this.verified = false;
       this.unsupported = new Set();       // fields the scooter refused; skipped from now on
@@ -57,6 +62,7 @@
       this._waiter = null;
       this._chain = Promise.resolve();
       this._polling = false;
+      this._pollGen = 0;                  // bumped per polling run so a stale loop can never outlive stopPolling()
     }
 
     /** Transport calls this with every notification's raw bytes. */
@@ -78,8 +84,7 @@
         while (this._queue.length) {
           const f = this._queue.shift();
           if (want(f)) return f;
-          this.parked.push(f);
-          if (this.parked.length > MAX_PARKED) this.parked.shift();
+          this._park(f);
         }
         const left = deadline - Date.now();
         if (left <= 0) throw new TimeoutError('no reply from scooter');
@@ -91,8 +96,17 @@
     }
 
     async _send(frames) {
-      this._queue.length = 0;             // drop stale frames from an earlier timed-out exchange
+      // Anything already waiting is not an answer to this request: a late reply to an earlier
+      // timed-out one, or a frame the scooter pushed on its own. Set it aside (takePushes()
+      // filters the pushes out) rather than letting it be mistaken for this request's reply.
+      for (const f of this._queue) this._park(f);
+      this._queue.length = 0;
       for (const f of frames) await this.transport.write(f);
+    }
+
+    _park(frame) {
+      this.parked.push({ t: Date.now(), frame });
+      if (this.parked.length > MAX_PARKED) this.parked.shift();
     }
 
     /** Serializes exchanges so two callers can never interleave frames. */
@@ -120,10 +134,11 @@
 
     // ------------------------------------------------------------ reads
 
-    _readOnce(names) {
+    /** One request/reply exchange for `names`. @returns {Promise<{values:Object,raws:Object}>} */
+    _readDetailedOnce(names, table) {
       return this._exclusive(async () => {
         if (!this.verified) throw new P.NiuError('not authenticated with the scooter yet');
-        await this._send(P.buildRead(names, this.aes));
+        await this._send(P.buildRead(names, this.aes, table));
         const frames = [];
         for (;;) {
           const f = await this._next((fr) => fr[0] === 0x01 &&
@@ -131,8 +146,63 @@
           frames.push(f);
           if (P.isLastReadFrame(f)) break;
         }
-        return P.parseReadFrames(frames, names, this.aes);
+        return P.parseReadFramesDetailed(frames, names, this.aes, table);
       });
+    }
+
+    async _readOnce(names) {
+      return (await this._readDetailedOnce(names, this.fieldTable)).values;
+    }
+
+    /**
+     * Reads fields from any table (default: this session's), returning raw bytes too, and
+     * sorting the outcome per field instead of throwing: if a group fails it asks for each
+     * field alone. A TimeoutError still propagates, because that means the link is in trouble.
+     * Does not touch the `unsupported` memory the dashboard polling uses.
+     * @returns {Promise<{values:Object, raws:Object, refused:Object<string,string>, errors:Object<string,string>}>}
+     *   refused: field -> the scooter's hex error code; errors: field -> message for a malformed reply
+     */
+    async readDetailed(names, table) {
+      const t = table || this.fieldTable;
+      const out = { values: {}, raws: {}, refused: {}, errors: {} };
+      const merge = (r) => { Object.assign(out.values, r.values); Object.assign(out.raws, r.raws); };
+      const classify = (name, err) => {
+        if (!(err instanceof P.NiuError)) throw err;
+        if (err.code) out.refused[name] = err.code;
+        else out.errors[name] = err.message;
+      };
+      try {
+        merge(await this._readDetailedOnce(names, t));
+        return out;
+      } catch (err) {
+        if (!(err instanceof P.NiuError)) throw err;
+        if (names.length === 1) { classify(names[0], err); return out; }
+      }
+      for (const name of names) {
+        try { merge(await this._readDetailedOnce([name], t)); }
+        catch (err) { classify(name, err); }
+      }
+      return out;
+    }
+
+    /**
+     * Unsolicited frames the scooter pushed, decoded if a catalogue was supplied. Clears them.
+     * @returns {{t:number, header:string, fields:Object|null, error?:string}[]}
+     */
+    takePushes() {
+      const PUSH_SECOND_BYTES = new Set([0x27, 0x07, 0x25, 0x22, 0x02, 0x30, 0x10]);
+      const out = [];
+      for (const { t, frame } of this.parked) {
+        if (frame.length !== C.FRAME_LENGTH || frame[0] !== 0x01 || !PUSH_SECOND_BYTES.has(frame[1])) continue;
+        const entry = { t, header: P.toHex(frame.subarray(0, 2)), fields: null };
+        if (this.catalogue) {
+          try { entry.fields = P.parsePush(frame, this.aes, this.catalogue.BY_CODE, this.catalogue.FIELDS); }
+          catch (err) { entry.error = err.message; }
+        }
+        out.push(entry);
+      }
+      this.parked = [];
+      return out;
     }
 
     /**
@@ -178,15 +248,17 @@
     startPolling({ intervalMs = 1000, maxFailures = 3, onTelemetry, onError }) {
       if (this._polling) return;
       this._polling = true;
+      const gen = ++this._pollGen;
+      const alive = () => this._polling && this._pollGen === gen;
       let failures = 0;
       const step = async (fn) => {
         try {
           const t = await fn();
           failures = 0;
-          if (this._polling && onTelemetry) onTelemetry(t);
+          if (alive() && onTelemetry) onTelemetry(t);
         } catch (err) {
           failures++;
-          if (failures >= maxFailures) {
+          if (failures >= maxFailures && alive()) {
             this._polling = false;
             if (onError) onError(err);
           }
@@ -194,15 +266,17 @@
       };
       (async () => {
         await step(() => this.readStatic());
-        while (this._polling) {
+        while (alive()) {
           await step(() => this.readStatus());
-          if (!this._polling) break;
+          if (!alive()) break;
           await new Promise((r) => setTimeout(r, intervalMs));
         }
       })();
     }
 
     stopPolling() { this._polling = false; }
+
+    get isPolling() { return this._polling; }
   }
 
   return { Session, TimeoutError, FAST_GROUP, STATIC_GROUP };
