@@ -9,10 +9,24 @@ records rides (GPS route, distance, top/average speed) on-device.
 
 ![Cockpit](screenshots/cockpit-live.png)
 
+Battery history and a ride's insights (synthetic data, rendered in headless Chromium; the map
+is blank only because the sandbox had no network for map tiles):
+
+<img src="screenshots/battery-synthetic.png" width="260"> <img src="screenshots/ride-detail-synthetic.png" width="260">
+
 ## What it does and doesn't do
 
 - **Reads** status from the scooter over Bluetooth: speed, battery %, battery health, charge
   cycle count, powered on/off, fault code, top speed, rated voltage.
+- **Keeps a battery history** on the device: battery %, health, charge cycles and power state
+  over time, with charts, inferred charges, and a health trend (the app can only see the
+  battery while connected, so charges are inferred from jumps between connections).
+- **Estimates your range** from your own real rides (pooled miles-per-percent, labelled
+  "rough" until there is enough data; simulated demo rides are never counted).
+- **Ride insights:** moving vs stopped time, scooter vs GPS top speed, battery used,
+  efficiency, elevation, and a route coloured by speed.
+- **Exports** a ride as GPX or CSV, all rides as a CSV summary, and the battery history as
+  CSV — via the share sheet if the browser offers one, else a download, else the clipboard.
 - **Never writes.** There are no lock, headlight, mode or setting controls, and the protocol
   module has no command builders — a test fails if one is ever added. (The NIU protocol has
   no headlight on/off command anyway.)
@@ -21,7 +35,7 @@ records rides (GPS route, distance, top/average speed) on-device.
 
 ## Status: what is verified, and what isn't
 
-**Verified by the automated tests (`npm test`, 90 tests, no scooter needed):**
+**Verified by the automated tests (`npm test`, 147 tests, no scooter needed):**
 
 | Area | How it is checked |
 | --- | --- |
@@ -29,6 +43,8 @@ records rides (GPS route, distance, top/average speed) on-device.
 | Frame format, handshake, read requests/replies | Byte-for-byte against a separate reference implementation (`test/fixtures/niu_vectors.json`, made-up test keys) |
 | Session logic: handshake, refusals, timeouts, polling, reassembly | Against a simulated scooter written independently of the app's code |
 | Web Bluetooth call sequence, read-only guarantee | Against a fake `navigator.bluetooth` |
+| Ride stats, range estimate, battery-history rules, charge inference, health trend, charts, GPX/CSV | Unit tests on synthetic rides and samples with hand-computed answers |
+| The whole app end to end (connect, record a ride, battery history, insights, exports) | jsdom, against the simulated scooter through the fake Bluetooth, with fake GPS |
 | UI wiring, Setup flow, no third-party scripts | jsdom |
 
 **Verified on a real KQi 200F (by hand, using the separate `niu-kqi` command-line tool, not
@@ -40,6 +56,11 @@ the handshake with the saved keys, shows the live battery %, and the live speed 
 roughly matches the scooter's own display. The battery health (93%), power state (ON) and top
 speed (30 km/h) readouts also match what the `niu-kqi` command-line tool read from the same
 scooter.
+
+**Battery history, range, insights and export** have been tested in code and by rendering
+them with synthetic data (screenshots below are synthetic), but **not yet on a real phone over
+real use**. Still unverified there: whether the share sheet or download works in Bluefy, how
+accurate the range estimate becomes, and the speed-coloured route on a real ride.
 
 **Still not verified:**
 
@@ -55,7 +76,7 @@ npm install
 npm test
 ```
 
-Seven suites: `crypto`, `protocol`, `session`, `ble`, `keystore`, `geo`, `dom-wiring`.
+Ten suites: `crypto`, `protocol`, `session`, `ble`, `keystore`, `insights`, `exporters`, `battery`, `geo`, `dom-wiring`.
 
 ## Getting your scooter keys (one time)
 
@@ -115,13 +136,18 @@ Tap **Simulate telemetry** on the Cockpit screen — it feeds fake data through 
   Within one page session, a dropped link can be re-established without the picker.
 - **The scooter may power itself off when idle**, which ends the session; reconnect after
   turning it on.
+- **The range estimate is only an estimate.** Battery % is a whole number, hills, load and
+  temperature change consumption, and battery behaviour is not linear near empty. It pools
+  your recent real rides and says "rough" until there are at least 3 rides and 15% of battery
+  used.
 - NIU has not published this protocol. It was reverse-engineered by others and can change in a
   firmware or app update.
 
 ## Privacy
 
 - No accounts, analytics or crash reporters; no NIU cloud calls from this app.
-- Ride history is in IndexedDB and the scooter keys are in localStorage — on-device only.
+- Ride history and battery history are in IndexedDB and the scooter keys are in localStorage — on-device only.
+- Exports are generated on the device. Where they go next (Files, Messages, email…) is up to you in the share sheet.
 - **No third-party scripts.** Leaflet is vendored (`vendor/leaflet/`, pinned and hash-recorded)
   specifically so no other host's JavaScript can run in the same origin as the stored keys.
 - The remaining outbound requests are non-script: Google Fonts CSS, and OpenStreetMap map tiles
@@ -142,7 +168,7 @@ request/response pattern — the scooter sends nothing until asked. Details and 
 ## Project structure
 
 ```
-index.html            Cockpit, Rides and Setup screens, tab bar, ride-detail overlay
+index.html            Cockpit, Rides, Battery and Setup screens, tab bar, ride-detail overlay
 manifest.json         PWA manifest (only used by browsers that support installing web apps)
 css/style.css         OLED dark theme
 js/
@@ -153,6 +179,10 @@ js/
   ble.js              Web Bluetooth transport + connection state
   keystore.js         Parse/validate/store the scooter keys (localStorage)
   storage.js          IndexedDB ride history
+  battery.js          Battery-history store, record rules, charge inference, health trend
+  insights.js         Ride stats, range estimate, speed-coloured route (pure)
+  exporters.js        GPX / CSV generation and share / download / clipboard delivery
+  charts.js           Tiny dependency-free SVG line charts
   geo.js              Foreground GPS trip recording (haversine distance)
   app.js              Wires everything to the DOM
 vendor/leaflet/       Vendored Leaflet 1.9.4 (BSD-2)

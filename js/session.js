@@ -31,7 +31,9 @@
 
   function defaultRandom(n) {
     const out = new Uint8Array(n);
-    (globalThis.crypto || require('crypto').webcrypto).getRandomValues(out);
+    const c = globalThis.crypto || (typeof require === 'function' ? require('crypto').webcrypto : null);
+    if (!c || !c.getRandomValues) throw new Error('No secure random number generator available.');
+    c.getRandomValues(out);
     return out;
   }
 

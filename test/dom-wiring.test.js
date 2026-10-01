@@ -13,6 +13,9 @@ const path = require('path');
 const assert = require('assert');
 const { JSDOM } = require('jsdom');
 require('fake-indexeddb/auto');
+const { IDBFactory, IDBKeyRange: FakeIDBKeyRange } = require('fake-indexeddb');
+const { FakeScooter, defaultFields } = require('./helpers/fake-scooter.js');
+const { fakeBluetooth } = require('./helpers/fake-bluetooth.js');
 
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -44,7 +47,7 @@ window.L = {
 // desktop browser without BLE/GPS — app.js is expected to degrade
 // gracefully rather than throw.
 
-const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'geo.js', 'app.js'];
+const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'geo.js', 'app.js'];
 
 let passed = 0;
 const queue = [];
@@ -63,7 +66,7 @@ test('every js/*.js file executes in the page context without throwing', () => {
 
 test('NIU namespace is fully populated after boot', () => {
   assert.ok(window.NIU, 'window.NIU should exist');
-  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker']) {
+  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker', 'Insights', 'Exporters', 'Charts', 'Battery']) {
     assert.ok(window.NIU[key], `window.NIU.${key} should be defined`);
   }
 });
@@ -225,6 +228,203 @@ test('Connect with saved keys opens the picker, and cancelling it shows a friend
   assert.match(d.getElementById('toast').textContent, /No scooter selected/);
   assert.strictEqual(d.getElementById('statusDot').className, 'dot disconnected');
   w.close();
+});
+
+
+// =====================================================================
+// End-to-end: the real page, real app.js and real modules, talking to a
+// simulated scooter through a fake Web Bluetooth, with fake GPS.
+// Each test boots its own window with its own empty IndexedDB.
+// =====================================================================
+const PWD = '0123456789abcdef';
+const AES = 'fedcba9876543210';
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, what, ms = 4000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (await fn()) return; await wait(25); }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+function bootApp({ bluetooth = true, keys = true } = {}) {
+  const w = new JSDOM(html, { url: 'https://example.com/index.html', runScripts: 'outside-only', pretendToBeVisual: true }).window;
+  w.indexedDB = new IDBFactory();           // private, empty database per window
+  w.IDBKeyRange = FakeIDBKeyRange;
+  const leaflet = { polylines: [] };
+  w.L = {
+    map: () => ({ remove() {}, setView() { return this; }, fitBounds() {} }),
+    tileLayer: () => ({ addTo() { return this; } }),
+    polyline: (latlngs, opts) => { leaflet.polylines.push({ latlngs, opts }); return { addTo() { return this; } }; },
+    circleMarker: () => ({ addTo() { return this; } }),
+    latLngBounds: (l) => l,
+  };
+  const geo = {
+    cb: null,
+    watchPosition(ok) { this.cb = ok; return 1; },
+    clearWatch() { this.cb = null; },
+    emit(lat, lon, t, alt) { if (this.cb) this.cb({ coords: { latitude: lat, longitude: lon, accuracy: 5, altitude: alt, speed: 5 }, timestamp: t }); },
+  };
+  Object.defineProperty(w.navigator, 'geolocation', { value: geo });
+  const shared = [];
+  Object.defineProperty(w.navigator, 'canShare', { value: () => true });
+  Object.defineProperty(w.navigator, 'share', { value: async (d) => { shared.push(d); } });
+  let scooter = null;
+  if (bluetooth) {
+    scooter = new FakeScooter({ password: PWD, aesKey: AES, fields: defaultFields() });
+    Object.defineProperty(w.navigator, 'bluetooth', { value: fakeBluetooth(scooter).bluetooth });
+  }
+  for (const file of files) w.eval(fs.readFileSync(path.join(root, 'js', file), 'utf8'));
+  if (keys) w.NIU.KeyStore.save({ password: PWD, aes: AES });
+  const $ = (id) => w.document.getElementById(id);
+  const tab = (target) => w.document.querySelector(`.tab-btn[data-target="${target}"]`).click();
+  return { w, $, tab, geo, scooter, shared, leaflet };
+}
+async function connect(app) {
+  app.$('connectBtn').click();
+  await until(() => app.$('batteryPct').textContent === '59%' && app.$('cyclesVal').textContent === '151', 'the scooter to connect and report');
+}
+
+test('E2E: connecting shows live battery, health, power, top speed and charge cycles', async () => {
+  const app = bootApp();
+  await connect(app);
+  assert.strictEqual(app.$('healthVal').textContent, '93%');
+  assert.strictEqual(app.$('powerVal').textContent, 'ON');
+  assert.strictEqual(app.$('maxSpeedVal').textContent, '19');       // 30 km/h in mph
+  assert.strictEqual(app.$('cyclesVal').textContent, '151');
+  assert.strictEqual(app.$('statusDot').className, 'dot connected');
+  app.w.close();
+});
+
+test('E2E: a real connection records battery history, and the Battery tab shows it', async () => {
+  const app = bootApp();
+  await connect(app);
+  await until(async () => (await new app.w.NIU.Battery.BatteryStore().count()) >= 1, 'a battery sample to be stored');
+  const samples = await new app.w.NIU.Battery.BatteryStore().all();
+  assert.deepStrictEqual({ soc: samples[0].soc, soh: samples[0].soh, cycles: samples[0].cycles, on: samples[0].on },
+    { soc: 59, soh: 93, cycles: 151, on: true });
+  app.tab('batteryScreen');
+  await until(() => app.$('batteryBody').style.display === 'block', 'the Battery screen to render');
+  assert.strictEqual(app.$('bHealth').textContent, '93%');
+  assert.strictEqual(app.$('bCycles').textContent, '151');
+  assert.ok(app.$('socChart').innerHTML.includes('<svg'), 'battery level chart should be drawn');
+  assert.match(app.$('healthTrend').textContent, /Not enough data/);
+  assert.strictEqual(app.$('chargesList').children[0].className, 'none');
+  app.w.close();
+});
+
+test('E2E: demo mode never writes to the battery history or leaks into real data', async () => {
+  const app = bootApp({ bluetooth: false });
+  app.$('demoToggleBtn').click();
+  await wait(900);
+  app.$('demoToggleBtn').click();
+  assert.strictEqual(await new app.w.NIU.Battery.BatteryStore().count(), 0, 'simulated telemetry must not be logged');
+  app.tab('batteryScreen');
+  await wait(100);
+  assert.strictEqual(app.$('batteryEmpty').style.display, 'block');
+  app.w.close();
+});
+
+test('E2E: a ride records battery at start and end, shows insights, and exports GPX/CSV', async () => {
+  const app = bootApp();
+  await connect(app);
+  app.$('rideBtn').click();
+  assert.ok(app.geo.cb, 'ride should start GPS tracking');
+  const t0 = Date.now();
+  for (let i = 0; i < 12; i++) app.geo.emit(33.77 + i * 0.00005, -118.19, t0 + i * 1000, 10 + i * 2);   // ~5.5 m per second, climbing
+  app.scooter.fields['31001C'].value = 53;                                         // battery drops while riding
+  await until(() => app.$('batteryPct').textContent === '53%', 'the new battery level');
+  app.$('rideBtn').click();
+  const store = new app.w.NIU.RideStore();
+  await until(async () => (await store.getAllRides()).length === 1, 'the ride to be saved');
+  const [ride] = await store.getAllRides();
+  assert.strictEqual(ride.startSOC, 59);
+  assert.strictEqual(ride.endSOC, 53);
+  assert.strictEqual(ride.simulated, false);
+  assert.ok(ride.points.length >= 10);
+
+  app.tab('ridesScreen');
+  await until(() => app.w.document.querySelector('.ride-row'), 'the ride row');
+  app.w.document.querySelector('.ride-row').click();
+  const rows = [...app.$('detailInsights').children].map((li) => li.children[0].textContent + '|' + li.children[1].textContent);
+  assert.ok(rows.some((r) => r.startsWith('Battery used|6% (59% → 53%)')), rows.join(' ; '));
+  assert.ok(rows.some((r) => r.startsWith('Elevation|↑')), 'elevation should be listed: ' + rows.join(' ; '));
+  assert.ok(app.leaflet.polylines.length >= 1, 'the route should be drawn');
+  assert.ok(app.leaflet.polylines.every((p) => /^#[0-9a-f]{6}$/i.test(p.opts.color)), 'route segments are coloured by speed');
+
+  app.$('exportGpxBtn').click();
+  await until(() => app.shared.length === 1, 'GPX share');
+  assert.match(app.shared[0].files[0].name, /^niu-ride-\d{8}T\d{6}Z\.gpx$/);
+  assert.strictEqual(app.shared[0].files[0].type, 'application/gpx+xml');
+  assert.ok(app.shared[0].files[0].size > 200);
+  app.$('exportCsvBtn').click();
+  await until(() => app.shared.length === 2, 'CSV share');
+  assert.match(app.shared[1].files[0].name, /\.csv$/);
+  app.w.close();
+});
+
+test('E2E: the range estimate learns from real rides only, and ignores simulated ones', async () => {
+  const app = bootApp();
+  const store = new app.w.NIU.RideStore();
+  const mi = 1609.344;
+  const mk = (i, extra) => ({ id: `r${i}`, startDate: 1_000_000 + i, endDate: 1_000_500 + i, distanceMeters: 2 * mi, topSpeedKPH: 20,
+    averageSpeedKPH: 15, activeRidingSeconds: 500, points: [], startSOC: 90, endSOC: 82, simulated: false, ...extra });
+  for (let i = 1; i <= 3; i++) await store.saveRide(mk(i));
+  await store.saveRide(mk(9, { simulated: true, distanceMeters: 50 * mi }));      // would wreck the estimate if counted
+  app.tab('ridesScreen');
+  await until(() => app.w.document.querySelectorAll('.ride-row').length === 4, 'seeded rides');
+  assert.ok(!/after a few rides/.test(app.$('rangeLine').textContent), 'rides exist, so it must not say it is still learning');
+  assert.match(app.$('rangeLine').textContent, /Typically 0\.25 mi per 1% battery/);
+  await connect(app);
+  assert.match(app.$('rangeLine').textContent, /≈ 14\.8 mi left/);              // 59% x 0.25 mi/%
+  assert.match(app.$('rangeLine').textContent, /from 3 rides/);
+  assert.ok(!app.$('rangeLine').textContent.includes('rough'));
+  app.$('unitToggle').click();                                                       // -> km
+  assert.match(app.$('rangeLine').textContent, /≈ 23\.7 km left/);
+  app.w.close();
+});
+
+test('Battery tab: two taps are needed to clear history', async () => {
+  const app = bootApp({ bluetooth: false });
+  const b = new app.w.NIU.Battery.BatteryStore();
+  const now = Date.now();
+  await b.add({ t: now - 3600000, soc: 60, soh: 93, cycles: 150 });
+  await b.add({ t: now - 60000, soc: 55, soh: 93, cycles: 151 });
+  app.tab('batteryScreen');
+  await until(() => app.$('batteryBody').style.display === 'block', 'history to render');
+  app.$('clearBatteryBtn').click();
+  assert.strictEqual(app.$('clearBatteryBtn').textContent, 'Tap again to delete');
+  assert.strictEqual(await b.count(), 2, 'one tap must not delete anything');
+  app.$('clearBatteryBtn').click();
+  await until(async () => (await b.count()) === 0, 'history to be cleared');
+  await until(() => app.$('batteryEmpty').style.display === 'block', 'empty state');
+  assert.strictEqual(app.$('clearBatteryBtn').textContent, 'Clear history');
+  app.w.close();
+});
+
+test('Battery tab: infers a charge from a jump in battery level and lists it', async () => {
+  const app = bootApp({ bluetooth: false });
+  const b = new app.w.NIU.Battery.BatteryStore();
+  const now = Date.now();
+  await b.add({ t: now - 7200000, soc: 30, soh: 93, cycles: 150 });
+  await b.add({ t: now - 60000, soc: 100, soh: 93, cycles: 151 });
+  app.tab('batteryScreen');
+  await until(() => app.$('batteryBody').style.display === 'block', 'history to render');
+  assert.strictEqual(app.$('bCharges').textContent, '1');
+  assert.match(app.$('chargesList').children[0].textContent, /30% → 100%/);
+  app.w.close();
+});
+
+test('exports are offered only when there is something to export', async () => {
+  const app = bootApp({ bluetooth: false });
+  app.tab('ridesScreen');
+  await wait(100);
+  assert.strictEqual(app.$('exportAllBtn').style.display, 'none');
+  await new app.w.NIU.RideStore().saveRide({ id: 'x', startDate: 1, endDate: 2, distanceMeters: 100, points: [], topSpeedKPH: 0, averageSpeedKPH: 0, activeRidingSeconds: 1 });
+  app.tab('cockpitScreen'); app.tab('ridesScreen');
+  await until(() => app.$('exportAllBtn').style.display === 'inline-block', 'the export button');
+  app.$('exportAllBtn').click();
+  await until(() => app.shared.length === 1, 'summary share');
+  assert.match(app.shared[0].files[0].name, /^niu-rides-.*\.csv$/);
+  app.w.close();
 });
 
 (async () => {
