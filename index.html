@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
 </head>
 <body>
 <div id="app">
@@ -59,17 +59,10 @@
       <div class="readout"><div id="tripTop" class="v">0</div><div id="tripTopLabel" class="t">Top mph</div></div>
     </div>
 
-    <div class="controls">
-      <button id="headlightBtn" class="rocker" data-active="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-6 6c0 2.5 1.5 4 2.5 5.2.5.6.5 1.8.5 1.8h6s0-1.2.5-1.8C16.5 13 18 11.5 18 9a6 6 0 0 0-6-6z"/></svg>
-        <span class="label">Headlight</span>
-        <span class="switch" role="switch" aria-checked="false"></span>
-      </button>
-      <button id="lockBtn" class="rocker lock" data-active="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-        <span class="label">Motor lock</span>
-        <span class="switch" role="switch" aria-checked="false"></span>
-      </button>
+    <div class="instrument-strip info-strip">
+      <div class="readout"><div id="healthVal" class="v">&ndash;</div><div class="t">Battery health</div></div>
+      <div class="readout"><div id="powerVal" class="v off">&ndash;</div><div class="t">Scooter</div></div>
+      <div class="readout"><div id="maxSpeedVal" class="v">&ndash;</div><div id="maxSpeedLabel" class="t">Max mph</div></div>
     </div>
 
     <div class="spacer"></div>
@@ -89,6 +82,23 @@
     </div>
   </section>
 
+  <!-- ================= Setup ================= -->
+  <section id="setupScreen" class="screen">
+    <div class="screen-title">Setup</div>
+    <div class="setup-card">
+      <h3>Scooter keys</h3>
+      <p>This app talks to your scooter with two secrets NIU assigns to it: its Bluetooth password and AES key. They are stored only in this browser, on this device.</p>
+      <p class="hint">Get them once with the open-source <em>niu-kqi</em> tool, which logs in to NIU on your computer and saves them to <code>secrets/scooter.json</code>. Paste that file's contents below, or paste the password and the AES key on two lines.</p>
+      <textarea id="keysInput" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste scooter.json, or the password and AES key on two lines"></textarea>
+      <div class="setup-actions">
+        <button id="saveKeysBtn" class="btn primary">Save keys</button>
+        <button id="clearKeysBtn" class="btn">Remove keys</button>
+      </div>
+      <div id="keysStatus" class="keys-status" role="status">No keys saved</div>
+      <p class="hint small">Read-only: this app only reads status from your scooter and never sends commands. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
+    </div>
+  </section>
+
   <!-- ================= Tab bar ================= -->
   <nav class="tabbar">
     <button class="tab-btn active" data-target="cockpitScreen">
@@ -98,6 +108,10 @@
     <button class="tab-btn" data-target="ridesScreen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
       Rides
+    </button>
+    <button class="tab-btn" data-target="setupScreen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/></svg>
+      Setup
     </button>
   </nav>
 
@@ -120,9 +134,12 @@
   <div id="toast"></div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="js/constants.js"></script>
+<script src="js/crypto.js"></script>
 <script src="js/protocol.js"></script>
+<script src="js/session.js"></script>
+<script src="js/keystore.js"></script>
 <script src="js/ble.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/geo.js"></script>

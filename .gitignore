@@ -1,2 +1,7 @@
 node_modules/
 .DS_Store
+# scooter keys / captures must never be committed
+secrets/
+scooter.json
+session.json
+*.pklg

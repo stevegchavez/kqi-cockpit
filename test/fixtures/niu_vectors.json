@@ -1,0 +1,93 @@
+{
+ "aes": "fedcba9876543210",
+ "aesHex32": "00112233445566778899aabbccddeeff",
+ "badChecksumFrame": "01a100997554c2353422b9bcffbfd4df0c18d700",
+ "decode": {
+  "U16": 300,
+  "UTF8": "K2C2FV32",
+  "UTF8_nulpad": "K2C"
+ },
+ "hs1Frame": "0123019afd8216f9951ba649fb3b91f5cdbb4575",
+ "hs1RejectFrame": "01c30091662224290245109fb4643e505b495cc6",
+ "hs1Reply": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+ "hs1ReplyFrame": "01a301eef280270e3873b69c0620e92e2161d5cb",
+ "hs2BadFrame": "01830046c1ccfb7dbd07304957b796ac71ffeab6",
+ "hs2Frame": "010300d9a63771263af9c5877ea5a3a47bfa05b4",
+ "hs2OkFrame": "018300bcd0fdabd0aecf889aabab6acb033a4130",
+ "lossFrames": [
+  "01a101d3747a99d966408ae1bd606c52c7a3406c"
+ ],
+ "pwd": "0123456789abcdef",
+ "readErrorFrame": "01e100b2ec891f1479bd19bfa811d19fb5fab3d5",
+ "reads": {
+  "fast": {
+   "expected": {
+    "bms_soc_rt": 59,
+    "bms_soh_rt": 93,
+    "db_k_f_code": 0,
+    "db_k_realtime_status": 4325377,
+    "foc_k_rt_speed": 123
+   },
+   "names": [
+    "foc_k_rt_speed",
+    "bms_soc_rt",
+    "db_k_realtime_status",
+    "db_k_f_code",
+    "bms_soh_rt"
+   ],
+   "replyFrames": [
+    "01a100997554c2353422b9bcffbfd4df0c18d732"
+   ],
+   "request": [
+    "012100ccb97d6289cc8e4f3171d830a88c063cd8"
+   ],
+   "requestHex32Key": [
+    "0121002f22e8b5a458625acd8d88e34b491b1f5b"
+   ]
+  },
+  "long": {
+   "expected": {
+    "bms_s_ver_n": "K3D66V02",
+    "db_k_sw_ver": "K2C2FV32",
+    "foc_k_s_ver": "KDE13G07"
+   },
+   "names": [
+    "db_k_sw_ver",
+    "foc_k_s_ver",
+    "bms_s_ver_n"
+   ],
+   "replyFrames": [
+    "01a101d3747a99d966408ae1bd606c52c7a3406c",
+    "0181001bb40415fa5f72609276566af1d47a922e"
+   ],
+   "request": [
+    "012100f017a299b2d7c6f4010c4c12866c93089f"
+   ],
+   "requestHex32Key": [
+    "0121008fcb4c6b8be4451ff2d2f9b9ebe5a1321f"
+   ]
+  },
+  "static": {
+   "expected": {
+    "bms_rated_vlt": 48,
+    "db_k_sw_ver": "K2C2FV32",
+    "foc_k_max_speed": 300
+   },
+   "names": [
+    "foc_k_max_speed",
+    "bms_rated_vlt",
+    "db_k_sw_ver"
+   ],
+   "replyFrames": [
+    "01a100395cce454b08675703d993745cf8276922"
+   ],
+   "request": [
+    "012100dda79e0dc21c148129018fcda3abfab143"
+   ],
+   "requestHex32Key": [
+    "012100ae1484ce8617ce101dc40eaf66368e39b2"
+   ]
+  }
+ },
+ "rnd": "a1a1a1a1a1a1a1a15c5c5c5c5c5c5c5c"
+}

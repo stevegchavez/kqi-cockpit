@@ -1,125 +1,162 @@
 /**
  * protocol.test.js — run with: node test/protocol.test.js
  *
- * Exercises the exact same protocol.js that ships to the browser dashboard.
- * No test framework dependency — plain assert, zero installs required.
+ * The important checks compare js/protocol.js byte-for-byte with output of a
+ * separate reference implementation (Python, niu-kqi) stored in
+ * test/fixtures/niu_vectors.json. Those vectors use made-up TEST keys.
  */
 const assert = require('assert');
-const Protocol = require('../js/protocol.js');
-const C = require('../js/constants.js');
+const P = require('../js/protocol.js');
+const V = require('./fixtures/niu_vectors.json');
 
 let passed = 0;
 function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ok - ${name}`);
-  } catch (err) {
-    console.error(`  FAIL - ${name}`);
-    console.error(`    ${err.message}`);
-    process.exitCode = 1;
-  }
+  try { fn(); passed++; console.log(`  ok - ${name}`); }
+  catch (err) { console.error(`  FAIL - ${name}\n    ${err.stack}`); process.exitCode = 1; }
+}
+const h = P.fromHex;
+const hex = P.toHex;
+const hexList = (frames) => frames.map(hex);
+
+console.log('protocol (NIU BLE-10 frames, handshake, reads)\n');
+
+// ---- basics
+test('checksum is the byte sum mod 256 and checksumOk validates it', () => {
+  assert.strictEqual(P.checksum(h('ff01')), 0x00);
+  assert.strictEqual(P.checksum(h('0102030405')), 15);
+  assert.ok(P.checksumOk(h('01020306')));
+  assert.ok(!P.checksumOk(h('01020307')));
+});
+
+test('keyBytes accepts 16 ASCII chars or 32 hex digits and rejects anything else', () => {
+  assert.strictEqual(P.keyBytes('0123456789abcdef').length, 16);
+  assert.strictEqual(hex(P.keyBytes('00112233445566778899aabbccddeeff')), '00112233445566778899aabbccddeeff');
+  assert.throws(() => P.keyBytes('short'), /16 characters or 32 hex/);
+  assert.throws(() => P.keyBytes('0123456789abcdeé'), /ASCII/);
+  assert.throws(() => P.keyBytes(''), /16 characters or 32 hex/);
+});
+
+// ---- handshake vs reference
+test('handshake step 1 request matches the reference byte-for-byte', () => {
+  assert.strictEqual(hex(P.handshake1(V.pwd, h(V.rnd))), V.hs1Frame);
+});
+
+test('handshake step 1 request has the 01 23 01 prefix seen on the real 200F', () => {
+  const f = P.handshake1(V.pwd, h(V.rnd));
+  assert.strictEqual(f.length, 20);
+  assert.strictEqual(hex(f.subarray(0, 3)), '012301');
+});
+
+test('handshake step 1 reply decrypts to the scooter\'s plaintext', () => {
+  assert.strictEqual(hex(P.parseHandshake1Reply(h(V.hs1ReplyFrame), V.pwd)), V.hs1Reply);
+});
+
+test('handshake step 2 request matches the reference byte-for-byte', () => {
+  assert.strictEqual(hex(P.handshake2(V.pwd, h(V.rnd), h(V.hs1Reply))), V.hs2Frame);
+});
+
+test('handshake step 2 request has the 01 03 00 prefix seen on the real 200F', () => {
+  assert.strictEqual(hex(P.handshake2(V.pwd, h(V.rnd), h(V.hs1Reply)).subarray(0, 3)), '010300');
+});
+
+test('handshake step 2 accepts a good reply and rejects a bad flag / rejected password', () => {
+  assert.doesNotThrow(() => P.parseHandshake2Reply(h(V.hs2OkFrame), V.pwd));
+  assert.throws(() => P.parseHandshake2Reply(h(V.hs2BadFrame), V.pwd), /password verify failed \(flag 07\)/);
+  assert.throws(() => P.parseHandshake1Reply(h(V.hs1RejectFrame), V.pwd), (e) => e.code === '2A' && /rejected at step 1/.test(e.message));
+});
+
+test('handshake rejects a corrupted reply and an unexpected header', () => {
+  const corrupt = h(V.hs1ReplyFrame); corrupt[19] ^= 0xff;
+  assert.throws(() => P.parseHandshake1Reply(corrupt, V.pwd), /bad checksum/);
+  assert.throws(() => P.parseHandshake1Reply(h(V.hs2OkFrame), V.pwd), /unexpected verify reply/);
+});
+
+// ---- reads vs reference
+for (const group of ['fast', 'static', 'long']) {
+  test(`read request "${group}" matches the reference (16-char key)`, () => {
+    const g = V.reads[group];
+    assert.deepStrictEqual(hexList(P.buildRead(g.names, V.aes)), g.request);
+  });
+  test(`read request "${group}" matches the reference (32-hex key)`, () => {
+    const g = V.reads[group];
+    assert.deepStrictEqual(hexList(P.buildRead(g.names, V.aesHex32)), g.requestHex32Key);
+  });
+  test(`read reply "${group}" decodes to the reference values`, () => {
+    const g = V.reads[group];
+    const got = P.parseReadFrames(g.replyFrames.map(h), g.names, V.aes);
+    assert.deepStrictEqual(got, g.expected);
+  });
 }
 
-function buildTelemetryFrame({ speedTenths, soc, odometer, faults, statusByte }) {
-  const payload = [
-    speedTenths & 0xff, (speedTenths >> 8) & 0xff,
-    soc & 0xff,
-    odometer & 0xff, (odometer >> 8) & 0xff, (odometer >> 16) & 0xff, (odometer >> 24) & 0xff,
-    faults & 0xff, (faults >> 8) & 0xff,
-    statusByte & 0xff,
-  ];
-  const body = [C.TELEMETRY_FRAME_TYPE, ...payload];
-  const withLen = [body.length + 1, ...body];
-  const checksum = Protocol.xorChecksum(withLen, 0, withLen.length);
-  return new Uint8Array([C.SYNC0, C.SYNC1, ...withLen, checksum]);
-}
-
-console.log('protocol.js\n');
-
-test('parses a well-formed telemetry frame with all fields', () => {
-  const frame = buildTelemetryFrame({
-    speedTenths: 155,       // 15.5 km/h
-    soc: 72,
-    odometer: 123456,
-    faults: 0,
-    statusByte: 0b01,       // headlight on, lock off
-  });
-  const parsed = Protocol.parseTelemetry(frame);
-  assert.ok(parsed, 'expected a non-null parse result');
-  assert.strictEqual(parsed.speedKPH, 15.5);
-  assert.strictEqual(parsed.batterySOC, 72);
-  assert.strictEqual(parsed.odometerMeters, 123456);
-  assert.strictEqual(parsed.faultFlags, 0);
-  assert.strictEqual(parsed.headlightOn, true);
-  assert.strictEqual(parsed.motorLocked, false);
+test('a 24-byte reply spans exactly two frames and index counts down', () => {
+  const frames = V.reads.long.replyFrames.map(h);
+  assert.strictEqual(frames.length, 2);
+  assert.strictEqual(frames[0][2], 0x01);
+  assert.strictEqual(frames[1][2], 0x00);
+  assert.ok(!P.isLastReadFrame(frames[0]));
+  assert.ok(P.isLastReadFrame(frames[1]));
 });
 
-test('clamps battery SOC to 100 even if the byte is out of range', () => {
-  const frame = buildTelemetryFrame({
-    speedTenths: 0, soc: 250, odometer: 0, faults: 0, statusByte: 0,
-  });
-  const parsed = Protocol.parseTelemetry(frame);
-  assert.strictEqual(parsed.batterySOC, 100);
+test('a refusal frame raises NiuError with the scooter\'s hex code (live case: 40)', () => {
+  assert.throws(
+    () => P.parseReadFrames([h(V.readErrorFrame)], V.reads.fast.names, V.aes),
+    (e) => e instanceof P.NiuError && e.code === '40' && /refused the read \(error 40\)/.test(e.message),
+  );
+  assert.ok(P.isReadError(h(V.readErrorFrame)));
+  assert.ok(P.isLastReadFrame(h(V.readErrorFrame)));
 });
 
-test('rejects a frame with a corrupted checksum', () => {
-  const frame = buildTelemetryFrame({
-    speedTenths: 100, soc: 50, odometer: 1000, faults: 0, statusByte: 0,
-  });
-  frame[frame.length - 1] ^= 0xff; // flip every bit of the checksum byte
-  const parsed = Protocol.parseTelemetry(frame);
-  assert.strictEqual(parsed, null);
+test('a bad checksum, a lost frame and a wrong key are all detected', () => {
+  assert.throws(() => P.parseReadFrames([h(V.badChecksumFrame)], V.reads.fast.names, V.aes), /bad checksum/);
+  assert.throws(() => P.parseReadFrames(V.lossFrames.map(h), V.reads.long.names, V.aes), /frame loss/);
+  // Wrong key yields garbage plaintext, never a silent success with the right numbers.
+  const wrong = P.parseReadFrames(V.reads.fast.replyFrames.map(h), V.reads.fast.names, '0000000000000000');
+  assert.notDeepStrictEqual(wrong, V.reads.fast.expected);
 });
 
-test('rejects a frame with the wrong sync bytes', () => {
-  const frame = buildTelemetryFrame({
-    speedTenths: 100, soc: 50, odometer: 1000, faults: 0, statusByte: 0,
-  });
-  frame[0] = 0x00;
-  assert.strictEqual(Protocol.parseTelemetry(frame), null);
+test('reading an unknown field is refused up front', () => {
+  assert.throws(() => P.buildRead(['no_such_field'], V.aes), /unknown or unsupported field/);
 });
 
-test('rejects a truncated frame instead of throwing', () => {
-  const frame = buildTelemetryFrame({
-    speedTenths: 100, soc: 50, odometer: 1000, faults: 0, statusByte: 0,
-  });
-  const truncated = frame.slice(0, 6);
-  assert.doesNotThrow(() => Protocol.parseTelemetry(truncated));
-  assert.strictEqual(Protocol.parseTelemetry(truncated), null);
+test('value decoding: big-endian ints and NUL-padded text', () => {
+  assert.strictEqual(P.decodeValue({ type: 'U16', len: 2 }, h('012c')), 300);
+  assert.strictEqual(P.decodeValue({ type: 'U32', len: 4 }, h('00420001')), 4325377);
+  assert.strictEqual(P.decodeValue({ type: 'UTF-8', len: 8 }, h('4b32433246563332')), V.decode.UTF8);
+  assert.strictEqual(P.decodeValue({ type: 'UTF-8', len: 8 }, h('4b32430000000000')), V.decode.UTF8_nulpad);
+  assert.strictEqual(V.decode.U16, 300);
 });
 
-test('does not misparse a control-channel command frame as telemetry', () => {
-  // frameType byte for a command frame is the command id (e.g. 0x01), which
-  // must never collide with TELEMETRY_FRAME_TYPE (0x21) or the parser could
-  // misread an outbound command echo as a live telemetry update.
-  const cmdFrame = Protocol.headlightCommand(true);
-  assert.strictEqual(Protocol.parseTelemetry(cmdFrame), null);
+test('splitNotification splits concatenated 20-byte frames and passes others through', () => {
+  const two = new Uint8Array(40).fill(1);
+  assert.strictEqual(P.splitNotification(two).length, 2);
+  assert.strictEqual(P.splitNotification(new Uint8Array(20)).length, 1);
+  assert.strictEqual(P.splitNotification(new Uint8Array(7)).length, 1);
 });
 
-test('encodeCommand produces the exact expected byte sequence', () => {
-  // sync(2) + length(1) + cmd(1) + payload(1) + checksum(1) = 6 bytes
-  const frame = Protocol.encodeCommand(C.CMD_HEADLIGHT, [0x01]);
-  assert.strictEqual(frame.length, 6);
-  assert.strictEqual(frame[0], 0x5a);
-  assert.strictEqual(frame[1], 0xa5);
-  assert.strictEqual(frame[2], 0x03); // length = cmd byte + 1 payload byte + 1
-  assert.strictEqual(frame[3], C.CMD_HEADLIGHT);
-  assert.strictEqual(frame[4], 0x01);
-  const expectedChecksum = frame[2] ^ frame[3] ^ frame[4];
-  assert.strictEqual(frame[5], expectedChecksum);
+// ---- interpretation
+test('interpretStatus turns the live-style reply into dashboard telemetry', () => {
+  const t = P.interpretStatus(V.reads.fast.expected);
+  assert.strictEqual(t.speedKPH, 12.3);
+  assert.strictEqual(t.batterySOC, 59);
+  assert.strictEqual(t.batteryHealth, 93);
+  assert.strictEqual(t.poweredOn, true);
+  assert.strictEqual(t.faultFlags, 0);
+  const s = P.interpretStatus(V.reads.static.expected);
+  assert.strictEqual(s.maxSpeedKPH, 30);
+  assert.strictEqual(s.ratedVoltage, 48);
+  assert.strictEqual(s.dashboardVersion, 'K2C2FV32');
 });
 
-test('headlightCommand / motorLockCommand toggle the correct payload byte', () => {
-  assert.strictEqual(Protocol.headlightCommand(true)[4], 0x01);
-  assert.strictEqual(Protocol.headlightCommand(false)[4], 0x00);
-  assert.strictEqual(Protocol.motorLockCommand(true)[4], 0x01);
-  assert.strictEqual(Protocol.motorLockCommand(false)[4], 0x00);
+test('interpretStatus only returns keys it was given, and caps percentages at 100', () => {
+  assert.deepStrictEqual(P.interpretStatus({}), {});
+  assert.deepStrictEqual(P.interpretStatus({ bms_soc_rt: 250 }), { batterySOC: 100 });
+  assert.strictEqual(P.interpretStatus({ db_k_realtime_status: 4325376 }).poweredOn, false);
 });
 
-test('requestStateCommand carries no payload bytes', () => {
-  const frame = Protocol.requestStateCommand();
-  assert.strictEqual(frame.length, 5); // sync(2)+length(1)+cmd(1)+checksum(1)
+// ---- safety
+test('this module is read-only: it exposes no write/command builders', () => {
+  const names = Object.keys(P).join(' ').toLowerCase();
+  assert.ok(!/write|command|lock|headlight/.test(names), `unexpected exports: ${names}`);
 });
 
 console.log(`\n${passed} passed`);
