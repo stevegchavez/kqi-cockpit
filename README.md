@@ -35,13 +35,17 @@ records rides (GPS route, distance, top/average speed) on-device.
 this web app):** the service/characteristic UUIDs, the BLE-10 handshake, and status reads —
 including battery % matching the scooter's own display.
 
-**Not yet verified — needs your phone:**
+**Verified on a real iPhone (Bluefy) with a KQi 200F, by hand:** the app connects, completes
+the handshake with the saved keys, shows the live battery %, and the live speed moves and
+roughly matches the scooter's own display.
 
-- This web app running on an actual iPhone in Bluefy against your scooter. The tests prove the
-  code uses the Web Bluetooth API correctly; they can't prove Bluefy's stack behaves the same.
-- **Live speed scale.** Speeds are reported as km/h × 10. That scale is confirmed for the
-  top-speed field but only *assumed* for live speed (the scooter was stationary when tested).
-  On your first ride, compare the cockpit's speed with the scooter's display or GPS.
+**Still not verified:**
+
+- **Speed accuracy.** Speeds are reported as km/h × 10. The scale is confirmed for the top-speed
+  field, and the live speed looked right by eye, but it hasn't been compared precisely.
+- The **battery health, power state and top speed** readouts haven't been checked against the
+  scooter on a phone yet.
+- A full **recorded ride** with GPS and a saved route.
 - Odometer isn't shown (no field has been confirmed for it).
 
 ## Running the tests
