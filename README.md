@@ -94,7 +94,9 @@ the phone use a tunnel (e.g. `ngrok http 8080`) or Pages.
 2. Setup tab → paste your keys → **Save keys**.
 3. Turn the scooter on, close the NIU app and anything else connected to it (the scooter
    accepts one connection at a time), then tap **Connect to scooter** and pick it.
-4. Optionally **Add to Home Screen** (uses `manifest.json`).
+4. To get back to it quickly, bookmark the page inside Bluefy. Bluefy may not offer
+   *Add to Home Screen*, and a Home Screen shortcut made from Safari would open in Safari,
+   which has no Web Bluetooth, so don't use that.
 
 ### No scooter handy?
 Tap **Simulate telemetry** on the Cockpit screen — it feeds fake data through the same
@@ -141,7 +143,7 @@ request/response pattern — the scooter sends nothing until asked. Details and 
 
 ```
 index.html            Cockpit, Rides and Setup screens, tab bar, ride-detail overlay
-manifest.json         PWA manifest (add-to-home-screen)
+manifest.json         PWA manifest (only used by browsers that support installing web apps)
 css/style.css         OLED dark theme
 js/
   constants.js        Service UUIDs, characteristic mapping, frame headers
