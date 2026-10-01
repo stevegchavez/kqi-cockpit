@@ -35,13 +35,17 @@ records rides (GPS route, distance, top/average speed) on-device.
 this web app):** the service/characteristic UUIDs, the BLE-10 handshake, and status reads —
 including battery % matching the scooter's own display.
 
-**Not yet verified — needs your phone:**
+**Verified on a real iPhone (Bluefy) with a KQi 200F, by hand:** the app connects, completes
+the handshake with the saved keys, shows the live battery %, and the live speed moves and
+roughly matches the scooter's own display. The battery health (93%), power state (ON) and top
+speed (30 km/h) readouts also match what the `niu-kqi` command-line tool read from the same
+scooter.
 
-- This web app running on an actual iPhone in Bluefy against your scooter. The tests prove the
-  code uses the Web Bluetooth API correctly; they can't prove Bluefy's stack behaves the same.
-- **Live speed scale.** Speeds are reported as km/h × 10. That scale is confirmed for the
-  top-speed field but only *assumed* for live speed (the scooter was stationary when tested).
-  On your first ride, compare the cockpit's speed with the scooter's display or GPS.
+**Still not verified:**
+
+- **Speed accuracy.** Speeds are reported as km/h × 10. The scale is confirmed for the top-speed
+  field, and the live speed looked right by eye, but it hasn't been compared precisely.
+- A full **recorded ride** with GPS and a saved route.
 - Odometer isn't shown (no field has been confirmed for it).
 
 ## Running the tests
@@ -90,7 +94,9 @@ the phone use a tunnel (e.g. `ngrok http 8080`) or Pages.
 2. Setup tab → paste your keys → **Save keys**.
 3. Turn the scooter on, close the NIU app and anything else connected to it (the scooter
    accepts one connection at a time), then tap **Connect to scooter** and pick it.
-4. Optionally **Add to Home Screen** (uses `manifest.json`).
+4. To get back to it quickly, bookmark the page inside Bluefy. Bluefy may not offer
+   *Add to Home Screen*, and a Home Screen shortcut made from Safari would open in Safari,
+   which has no Web Bluetooth, so don't use that.
 
 ### No scooter handy?
 Tap **Simulate telemetry** on the Cockpit screen — it feeds fake data through the same
@@ -137,7 +143,7 @@ request/response pattern — the scooter sends nothing until asked. Details and 
 
 ```
 index.html            Cockpit, Rides and Setup screens, tab bar, ride-detail overlay
-manifest.json         PWA manifest (add-to-home-screen)
+manifest.json         PWA manifest (only used by browsers that support installing web apps)
 css/style.css         OLED dark theme
 js/
   constants.js        Service UUIDs, characteristic mapping, frame headers
