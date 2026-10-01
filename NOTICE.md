@@ -1,0 +1,43 @@
+# Third-party notices
+
+## niu-kqi (protocol knowledge and field table subset)
+
+The NIU KQi Bluetooth frame format, the password handshake, and the field codes/types in
+`js/protocol.js` (`FIELDS`) come from the reverse-engineering work in
+<https://github.com/BaesTheorem/niu-kqi>, which is MIT licensed. `js/protocol.js` is an
+independent JavaScript implementation, checked byte-for-byte against that project's Python
+reference using test vectors (`test/fixtures/`), but it relies on that project's findings.
+
+```
+MIT License
+
+Copyright (c) 2026 Alex Hedtke
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Leaflet 1.9.4 (vendored)
+
+`vendor/leaflet/` contains an unmodified copy of Leaflet 1.9.4 (BSD-2-Clause, copyright
+Volodymyr Agafonkin and CloudMade). See `vendor/leaflet/LICENSE` and `vendor/leaflet/README.md`.
+
+## Not affiliated with NIU
+
+This is an independent project. NIU has not published this protocol, and it may change in a
+firmware or app update.

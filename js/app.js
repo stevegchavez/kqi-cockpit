@@ -1,9 +1,10 @@
 /**
  * app.js — NIU Companion Web Dashboard
  *
- * Wires BLEManager + GeoTracker + RideStore to the DOM, and drives the
- * instrument-cluster visuals: the radial speed gauge, battery cell strip,
- * rocker switches, ignition power-on sweep, and per-ride sparklines.
+ * Wires BLEManager + GeoTracker + RideStore + KeyStore to the DOM, and drives
+ * the instrument-cluster visuals: the radial speed gauge, battery cell strip,
+ * ignition power-on sweep, and per-ride sparklines. READ-ONLY: the app only
+ * reads status from the scooter; it has no controls that change it.
  */
 (function () {
   const ble = new NIU.BLEManager();
@@ -11,8 +12,9 @@
   const store = new NIU.RideStore();
 
   // Cosmetic scale for the gauge only — does not gate or validate real
-  // telemetry. KQi 200F's top speed is roughly this ballpark; adjust freely.
-  const GAUGE_MAX_KPH = 32;
+  // telemetry. Starts at a KQi-ish default and follows the scooter's own
+  // reported max speed once it is known.
+  let gaugeMaxKph = 32;
   const GAUGE_START_ANGLE = -130; // degrees, 0 = 12 o'clock, clockwise positive
   const GAUGE_END_ANGLE = 130;
   const GAUGE_REDLINE_PCT = 0.85;
@@ -20,7 +22,7 @@
 
   const state = {
     unit: localStorage.getItem('niu.unit') || 'mph', // display preference only, not ride data
-    scooter: { speedKPH: 0, batterySOC: 0, odometerMeters: 0, faultFlags: 0, headlightOn: false, motorLocked: false },
+    scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null },
     isRiding: false,
     rideStart: null,
     topSpeedKPH: 0,
@@ -44,8 +46,11 @@
   const tripDist = el('tripDist');
   const tripTime = el('tripTime');
   const tripTop = el('tripTop');
-  const headlightBtn = el('headlightBtn');
-  const lockBtn = el('lockBtn');
+  const healthVal = el('healthVal');
+  const powerVal = el('powerVal');
+  const maxSpeedVal = el('maxSpeedVal');
+  const keysInput = el('keysInput');
+  const keysStatus = el('keysStatus');
   const rideBtn = el('rideBtn');
   const demoToggleBtn = el('demoToggleBtn');
   const ridesList = el('ridesList');
@@ -109,7 +114,7 @@
     gaugeValue.classList.add('igniting');
     setGaugePercent(1);
     setTimeout(() => {
-      setGaugePercent(state.scooter.speedKPH / GAUGE_MAX_KPH);
+      setGaugePercent(state.scooter.speedKPH / gaugeMaxKph);
       setTimeout(() => gaugeValue.classList.remove('igniting'), 400);
     }, 420);
     renderCellStrip(0);
@@ -165,9 +170,20 @@
   });
 
   ble.addEventListener('telemetry', (e) => applyTelemetry(e.detail));
+  ble.addEventListener('error', (e) => showToast(e.detail.message));
+  ble.addEventListener('disconnected', () => {
+    state.scooter.poweredOn = null;
+    renderInfoStrip();
+  });
 
   connectBtn.addEventListener('click', async () => {
-    try { await ble.connect(); }
+    const keys = NIU.KeyStore.load();
+    if (!keys) {
+      showToast('Add your scooter keys in Setup first.');
+      showTab('setupScreen');
+      return;
+    }
+    try { await ble.connect(keys); }
     catch (err) { showToast(err.message); }
   });
 
@@ -175,7 +191,7 @@
     Object.assign(state.scooter, t);
     if (t.speedKPH !== undefined) {
       speedValue.textContent = Math.round(kphToDisplay(t.speedKPH));
-      setGaugePercent(t.speedKPH / GAUGE_MAX_KPH);
+      setGaugePercent(t.speedKPH / gaugeMaxKph);
       if (state.isRiding) {
         state.speedSamples.push(t.speedKPH);
         state.topSpeedKPH = Math.max(state.topSpeedKPH, t.speedKPH);
@@ -189,14 +205,17 @@
     if (t.faultFlags !== undefined) {
       faultLabel.style.display = t.faultFlags === 0 ? 'none' : 'flex';
     }
-    if (t.headlightOn !== undefined) {
-      headlightBtn.dataset.active = String(t.headlightOn);
-      headlightBtn.querySelector('.switch').setAttribute('aria-checked', String(t.headlightOn));
-    }
-    if (t.motorLocked !== undefined) {
-      lockBtn.dataset.active = String(t.motorLocked);
-      lockBtn.querySelector('.switch').setAttribute('aria-checked', String(t.motorLocked));
-    }
+    if (t.maxSpeedKPH) gaugeMaxKph = Math.max(10, Math.ceil(t.maxSpeedKPH * 1.1));
+    renderInfoStrip();
+  }
+
+  /** Battery health, power state and max speed — all read from the scooter. */
+  function renderInfoStrip() {
+    const s = state.scooter;
+    healthVal.textContent = s.batteryHealth == null ? '\u2013' : `${s.batteryHealth}%`;
+    powerVal.textContent = s.poweredOn == null ? '\u2013' : (s.poweredOn ? 'ON' : 'OFF');
+    powerVal.className = 'v ' + (s.poweredOn == null ? 'off' : (s.poweredOn ? 'on' : 'off'));
+    maxSpeedVal.textContent = s.maxSpeedKPH == null ? '\u2013' : Math.round(kphToDisplay(s.maxSpeedKPH));
   }
 
   // ---------- Unit toggle ----------
@@ -205,28 +224,14 @@
     unitToggle.textContent = state.unit === 'mph' ? 'KM/H' : 'MPH';
     el('tripDistLabel').textContent = `Trip ${distanceUnitLabel()}`;
     el('tripTopLabel').textContent = `Top ${state.unit}`;
+    el('maxSpeedLabel').textContent = `Max ${state.unit}`;
+    renderInfoStrip();
   }
   unitToggle.addEventListener('click', () => {
     state.unit = state.unit === 'mph' ? 'kph' : 'mph';
     localStorage.setItem('niu.unit', state.unit);
     refreshUnitLabels();
     speedValue.textContent = Math.round(kphToDisplay(state.scooter.speedKPH));
-  });
-
-  // ---------- Hardware controls ----------
-  function flashToggle(rocker) {
-    rocker.dataset.justToggled = 'true';
-    setTimeout(() => { rocker.dataset.justToggled = 'false'; }, 260);
-  }
-  headlightBtn.addEventListener('click', async () => {
-    flashToggle(headlightBtn);
-    try { await ble.setHeadlight(!state.scooter.headlightOn); }
-    catch (err) { showToast(err.message); }
-  });
-  lockBtn.addEventListener('click', async () => {
-    flashToggle(lockBtn);
-    try { await ble.setMotorLock(!state.scooter.motorLocked); }
-    catch (err) { showToast(err.message); }
   });
 
   // ---------- Ride lifecycle ----------
@@ -302,19 +307,48 @@
     state.demoTimer = setInterval(() => {
       t += 0.3;
       const speedKPH = Math.max(0, 18 + 12 * Math.sin(t));
-      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0 });
+      applyTelemetry({ speedKPH, batterySOC: Math.max(0, 78 - Math.floor(t / 4)), faultFlags: 0, batteryHealth: 93, poweredOn: true, maxSpeedKPH: 30 });
     }, 400);
   });
 
   // ---------- Tab navigation ----------
+  function showTab(target) {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.target === target));
+    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+    el(target).classList.add('active');
+    if (target === 'ridesScreen') renderRidesList();
+  }
   document.querySelectorAll('.tab-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
-      btn.classList.add('active');
-      el(btn.dataset.target).classList.add('active');
-      if (btn.dataset.target === 'ridesScreen') renderRidesList();
-    });
+    btn.addEventListener('click', () => showTab(btn.dataset.target));
+  });
+
+  // ---------- Setup: scooter keys ----------
+  function setKeysStatus(text, kind) {
+    keysStatus.textContent = text;
+    keysStatus.className = 'keys-status' + (kind ? ` ${kind}` : '');
+  }
+  function refreshKeysStatus() {
+    setKeysStatus(NIU.KeyStore.has() ? 'Keys saved on this device' : 'No keys saved', NIU.KeyStore.has() ? 'ok' : '');
+  }
+  el('saveKeysBtn').addEventListener('click', () => {
+    try {
+      const keys = NIU.KeyStore.parseKeys(keysInput.value);
+      if (!NIU.KeyStore.save(keys)) {
+        setKeysStatus('Could not save: this browser is blocking local storage (private window?).', 'err');
+        return;
+      }
+      keysInput.value = '';               // don't leave the secrets sitting on screen
+      refreshKeysStatus();
+      showToast('Keys saved. Tap Connect on the Cockpit tab.');
+    } catch (err) {
+      setKeysStatus(err.message, 'err');  // messages never include key material
+    }
+  });
+  el('clearKeysBtn').addEventListener('click', () => {
+    NIU.KeyStore.clear();
+    keysInput.value = '';
+    refreshKeysStatus();
+    showToast('Keys removed from this device.');
   });
 
   // ---------- Sparkline ----------
@@ -429,6 +463,7 @@
   initGauge();
   refreshUnitLabels();
   renderCellStrip(0);
+  refreshKeysStatus();
 
   if (!ble.isSupported) {
     dot.className = 'dot unsupported';
