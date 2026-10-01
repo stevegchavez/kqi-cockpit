@@ -1,0 +1,14 @@
+{
+  "name": "niu-companion-web-dashboard",
+  "version": "1.0.0",
+  "description": "Privacy-first Web Bluetooth companion dashboard for the NIU KQi 200F.",
+  "private": true,
+  "scripts": {
+    "test": "node test/protocol.test.js && node test/geo.test.js && node test/dom-wiring.test.js",
+    "serve": "python3 -m http.server 8080"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.1"
+  }
+}

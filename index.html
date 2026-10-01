@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0b0d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<title>NIU Companion — KQi Cockpit</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= Cockpit ================= -->
+  <section id="cockpitScreen" class="screen active">
+    <div class="banner">
+      <span id="statusDot" class="dot disconnected"></span>
+      <span id="statusLabel">Disconnected — tap to connect</span>
+      <span id="faultLabel" class="fault" style="display:none">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        Fault
+      </span>
+    </div>
+
+    <button id="connectBtn" class="connect-cta">Connect to scooter</button>
+
+    <div class="gauge-wrap">
+      <svg viewBox="0 0 200 200">
+        <path id="gaugeTrack" class="gauge-track"></path>
+        <path id="gaugeValue" class="gauge-value"></path>
+        <g id="gaugeTicks"></g>
+      </svg>
+      <div class="gauge-readout">
+        <div id="speedValue" class="value numeral">0</div>
+        <div class="unit-row">
+          <span id="speedUnit" class="unit">MPH</span>
+          <button id="unitToggle" class="unit-toggle">KM/H</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="battery-module">
+      <div class="battery-head">
+        <span id="batteryPct" class="pct">0%</span>
+        <span class="label">Battery</span>
+      </div>
+      <div id="cellStrip" class="cell-strip"></div>
+    </div>
+
+    <div class="instrument-strip">
+      <div class="readout"><div id="tripDist" class="v">0.00</div><div id="tripDistLabel" class="t">Trip mi</div></div>
+      <div class="readout"><div id="tripTime" class="v">0m 0s</div><div class="t">Elapsed</div></div>
+      <div class="readout"><div id="tripTop" class="v">0</div><div id="tripTopLabel" class="t">Top mph</div></div>
+    </div>
+
+    <div class="controls">
+      <button id="headlightBtn" class="rocker" data-active="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-6 6c0 2.5 1.5 4 2.5 5.2.5.6.5 1.8.5 1.8h6s0-1.2.5-1.8C16.5 13 18 11.5 18 9a6 6 0 0 0-6-6z"/></svg>
+        <span class="label">Headlight</span>
+        <span class="switch" role="switch" aria-checked="false"></span>
+      </button>
+      <button id="lockBtn" class="rocker lock" data-active="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <span class="label">Motor lock</span>
+        <span class="switch" role="switch" aria-checked="false"></span>
+      </button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <button id="demoToggleBtn" class="demo-toggle">Simulate telemetry (no scooter)</button>
+    <button id="rideBtn" class="ride-btn" disabled>START RIDE</button>
+  </section>
+
+  <!-- ================= Rides ================= -->
+  <section id="ridesScreen" class="screen">
+    <div class="screen-title">Rides</div>
+    <ul id="ridesList" class="rides-list"></ul>
+    <div id="emptyState" class="empty-state" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+      <h3>No rides yet</h3>
+      <p>Start a ride from the Cockpit tab and it'll show up here.</p>
+    </div>
+  </section>
+
+  <!-- ================= Tab bar ================= -->
+  <nav class="tabbar">
+    <button class="tab-btn active" data-target="cockpitScreen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 12l4-4"/></svg>
+      Cockpit
+    </button>
+    <button class="tab-btn" data-target="ridesScreen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+      Rides
+    </button>
+  </nav>
+
+  <!-- ================= Ride detail overlay ================= -->
+  <div id="rideDetail">
+    <div id="rideDetailMap"></div>
+    <div class="detail-header">
+      <button id="closeDetailBtn" class="back-btn">‹</button>
+      <span id="detailDate" class="detail-date-chip"></span>
+      <span style="width:38px"></span>
+    </div>
+    <div class="detail-summary instrument-strip">
+      <div class="readout"><div id="detailDist" class="v">0</div><div class="t">Distance</div></div>
+      <div class="readout"><div id="detailAvg" class="v">0</div><div class="t">Avg</div></div>
+      <div class="readout"><div id="detailTop" class="v">0</div><div class="t">Top</div></div>
+      <div class="readout"><div id="detailTime" class="v">0</div><div class="t">Time</div></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="js/constants.js"></script>
+<script src="js/protocol.js"></script>
+<script src="js/ble.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
