@@ -27,7 +27,7 @@ npm install
 npm test
 ```
 
-19 tests across three suites:
+22 tests across three suites:
 - `test/protocol.test.js` — frame encode/decode, checksum rejection, malformed-input handling
 - `test/geo.test.js` — haversine distance math against known coordinates
 - `test/dom-wiring.test.js` — boots the real `index.html` + `js/*.js` in jsdom, clicks buttons, asserts no missing element IDs or thrown errors
