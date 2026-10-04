@@ -125,6 +125,9 @@ function defaultFields() {
     '310016': { len: 1, value: 48 },            // bms_rated_vlt
     '310018': { len: 2, value: 151 },           // bms_c_cont: charge cycles
     '31003C': { len: 8, text: 'K3D66V02' },     // bms_s_ver_n
+    '31001A': { len: 2, value: 0 },             // bms_c_cur_rt: battery current (0 at rest on the real scooter)
+    '330001': { len: 2, value: 437 },           // bms_accumulated_dc_energy
+    '330002': { len: 2, value: 435 },           // bms_accumulated_c_energy
     '110004': { len: 4, value: 4325377 },       // db_k_realtime_status (powered on)
     '110006': { len: 1, value: 0 },             // db_k_f_code
     '110002': { len: 8, text: 'K2C2FV32' },     // db_k_sw_ver

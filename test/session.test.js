@@ -7,7 +7,7 @@
  */
 const assert = require('assert');
 const P = require('../js/protocol.js');
-const { Session, TimeoutError, FAST_GROUP, STATIC_GROUP } = require('../js/session.js');
+const { Session, TimeoutError, FAST_GROUP, STATIC_GROUP, ENERGY_GROUP } = require('../js/session.js');
 const { FakeScooter, defaultFields } = require('./helpers/fake-scooter.js');
 
 const PWD = '0123456789abcdef';
@@ -61,13 +61,13 @@ test('readStatus returns dashboard telemetry from the fast group', async () => {
   const { session } = link();
   await session.handshake();
   const t = await session.readStatus();
-  assert.deepStrictEqual(t, { speedKPH: 12.3, batterySOC: 59, poweredOn: true, faultFlags: 0, batteryHealth: 93 });
+  assert.deepStrictEqual(t, { speedKPH: 12.3, batterySOC: 59, poweredOn: true, faultFlags: 0, batteryCurrentRaw: 0 });
 });
 
-test('readStatic returns max speed, rated voltage, firmware and charge cycles', async () => {
+test('readStatic returns max speed, rated voltage, firmware, charge cycles, health and lifetime energy', async () => {
   const { session } = link();
   await session.handshake();
-  assert.deepStrictEqual(await session.readStatic(), { maxSpeedKPH: 30, ratedVoltage: 48, dashboardVersion: 'K2C2FV32', chargeCycles: 151 });
+  assert.deepStrictEqual(await session.readStatic(), { maxSpeedKPH: 30, ratedVoltage: 48, dashboardVersion: 'K2C2FV32', chargeCycles: 151, batteryHealth: 93, energyOutRaw: 437, energyInRaw: 435 });
 });
 
 test('a refused field falls back to one-by-one reads and is remembered as unsupported', async () => {
@@ -125,7 +125,7 @@ test('concurrent reads are serialized and both succeed', async () => {
   const [a, b] = await Promise.all([session.readStatus(), session.readStatic()]);
   assert.strictEqual(a.batterySOC, 59);
   assert.strictEqual(b.maxSpeedKPH, 30);
-  assert.strictEqual(scooter.log.length, 2);
+  assert.strictEqual(scooter.log.length, 3, 'one fast read, then the slow group and the energy group');
 });
 
 test('polling emits static info first, then repeated status, and stops on request', async () => {
@@ -162,8 +162,8 @@ test('malformed keys are rejected when the session is created', () => {
 });
 
 test('the polled field groups only use fields the protocol module supports', () => {
-  for (const name of [...FAST_GROUP, ...STATIC_GROUP]) assert.ok(P.FIELDS[name], `${name} missing from FIELDS`);
-  assert.ok(FAST_GROUP.length <= 5 && STATIC_GROUP.length <= 5, 'one 16-byte request block holds 5 codes');
+  for (const name of [...FAST_GROUP, ...STATIC_GROUP, ...ENERGY_GROUP]) assert.ok(P.FIELDS[name], `${name} missing from FIELDS`);
+  assert.ok(FAST_GROUP.length <= 5 && STATIC_GROUP.length <= 5 && ENERGY_GROUP.length <= 5, 'one 16-byte request block holds 5 codes');
 });
 
 // ---- Diagnostics-oriented behaviour: raw reads, per-field outcomes, pushes, polling races

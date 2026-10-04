@@ -20,8 +20,11 @@
 
   // What the dashboard polls. Both groups only contain fields that were read
   // successfully on a real KQi 200F; each fits in a single 16-byte request block.
-  const FAST_GROUP = ['foc_k_rt_speed', 'bms_soc_rt', 'db_k_realtime_status', 'db_k_f_code', 'bms_soh_rt'];
-  const STATIC_GROUP = ['foc_k_max_speed', 'bms_rated_vlt', 'db_k_sw_ver', 'bms_c_cont'];
+  // A request holds at most 5 field codes. Current is fast-changing; health changes over weeks,
+  // so it is read once per connection with the other slow values.
+  const FAST_GROUP = ['foc_k_rt_speed', 'bms_soc_rt', 'db_k_realtime_status', 'db_k_f_code', 'bms_c_cur_rt'];
+  const STATIC_GROUP = ['foc_k_max_speed', 'bms_rated_vlt', 'db_k_sw_ver', 'bms_c_cont', 'bms_soh_rt'];
+  const ENERGY_GROUP = ['bms_accumulated_dc_energy', 'bms_accumulated_c_energy'];
 
   const MAX_PARKED = 50;
 
@@ -237,7 +240,12 @@
     }
 
     async readStatus() { return P.interpretStatus(await this.read(FAST_GROUP)); }
-    async readStatic() { return P.interpretStatus(await this.read(STATIC_GROUP)); }
+    async readStatic() {
+      const first = await this.read(STATIC_GROUP);
+      let energy = {};
+      try { energy = await this.read(ENERGY_GROUP); } catch (err) { if (err instanceof TimeoutError) throw err; }
+      return P.interpretStatus(Object.assign(first, energy));
+    }
 
     // ------------------------------------------------------------ polling
 
@@ -279,5 +287,5 @@
     get isPolling() { return this._polling; }
   }
 
-  return { Session, TimeoutError, FAST_GROUP, STATIC_GROUP };
+  return { Session, TimeoutError, FAST_GROUP, STATIC_GROUP, ENERGY_GROUP };
 });

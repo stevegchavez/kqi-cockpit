@@ -36,10 +36,10 @@ window.IDBKeyRange = global.IDBKeyRange;
 // reach; app.js only calls L.map/L.tileLayer/L.polyline/L.circleMarker
 // inside openRideDetail(), which this smoke test doesn't invoke.
 window.L = {
-  map: () => ({ remove() {}, setView() { return this; }, fitBounds() {} }),
+  map: () => ({ remove() {}, setView() { return this; }, fitBounds() {}, invalidateSize() {} }),
   tileLayer: () => ({ addTo() { return this; } }),
-  polyline: () => ({ addTo() { return this; }, getBounds() { return {}; } }),
-  circleMarker: () => ({ addTo() { return this; } }),
+  polyline: () => ({ addTo() { return this; }, getBounds() { return {}; }, remove() {} }),
+  circleMarker: () => ({ addTo() { return this; }, remove() {}, setLatLng() {} }),
 };
 
 // localStorage exists in jsdom by default; navigator.bluetooth /
@@ -47,7 +47,7 @@ window.L = {
 // desktop browser without BLE/GPS — app.js is expected to degrade
 // gracefully rather than throw.
 
-const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'geo.js', 'app.js'];
+const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'planner.js', 'plan-ui.js', 'geo.js', 'app.js'];
 
 let passed = 0;
 const queue = [];
@@ -66,7 +66,7 @@ test('every js/*.js file executes in the page context without throwing', () => {
 
 test('NIU namespace is fully populated after boot', () => {
   assert.ok(window.NIU, 'window.NIU should exist');
-  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker', 'Insights', 'Exporters', 'Charts', 'Battery', 'Fields', 'Diagnostics', 'DiagUI']) {
+  for (const key of ['BLE_CONSTANTS', 'Crypto', 'Protocol', 'Session', 'KeyStore', 'BLEManager', 'RideStore', 'GeoTracker', 'Insights', 'Exporters', 'Charts', 'Battery', 'Fields', 'Diagnostics', 'DiagUI', 'Planner', 'PlanUI']) {
     assert.ok(window.NIU[key], `window.NIU.${key} should be defined`);
   }
 });
@@ -158,6 +158,103 @@ test('there are no controls that change the scooter (read-only app)', () => {
   assert.strictEqual(d.getElementById('headlightBtn'), null);
   assert.strictEqual(d.getElementById('lockBtn'), null);
   assert.strictEqual(d.querySelectorAll('.rocker, .switch').length, 0);
+});
+
+// ---- Plan tab: search, route, directions, following (network and GPS are faked) ----
+const M_LAT = (2 * Math.PI * 6371000) / 360;
+const PLAN_ORIGIN = { lat: 40, lon: -100 };
+const planNorth = (m) => PLAN_ORIGIN.lat + m / M_LAT;
+function planRouteBody() {
+  const coordinates = [];
+  for (let m = 0; m <= 2000; m += 25) coordinates.push([PLAN_ORIGIN.lon, planNorth(m)]);
+  return { code: 'Ok', routes: [{ distance: 2000, duration: 500, geometry: { coordinates }, legs: [{ steps: [
+    { distance: 1000, name: 'Elm Street', maneuver: { type: 'depart', location: [PLAN_ORIGIN.lon, planNorth(0)] } },
+    { distance: 1000, name: 'Oak Avenue', maneuver: { type: 'turn', modifier: 'left', location: [PLAN_ORIGIN.lon, planNorth(1000)] } },
+    { distance: 0, name: '', maneuver: { type: 'arrive', location: [PLAN_ORIGIN.lon, planNorth(2000)] } },
+  ] }] }] };
+}
+
+test('Plan: search results and street names are shown as text, never as markup', async () => {
+  const d = window.document;
+  const requests = [];
+  window.fetch = async (url) => {
+    requests.push(String(url));
+    if (String(url).includes('nominatim')) return { ok: true, json: async () => [{ display_name: '<img src=x onerror=alert(1)> Cafe, Town', lat: String(planNorth(2000)), lon: String(PLAN_ORIGIN.lon) }] };
+    return { ok: true, json: async () => planRouteBody() };
+  };
+  window.navigator.geolocation = {
+    getCurrentPosition: (ok) => ok({ coords: { latitude: planNorth(0), longitude: PLAN_ORIGIN.lon, accuracy: 5 } }),
+    watchPosition: () => 1, clearWatch() {},
+  };
+  assert.strictEqual(requests.length, 0, 'nothing is requested before the rider taps Search');
+  d.getElementById('planTo').value = 'cafe';
+  d.getElementById('planSearch').click();
+  await new Promise((r) => window.setTimeout(r, 50));
+  const btn = d.querySelector('#planResults .plan-result');
+  assert.ok(btn, 'a result button should be listed');
+  assert.strictEqual(d.querySelector('#planResults img'), null, 'a hostile place name must not become markup');
+  assert.ok(btn.textContent.includes('<img'), 'it is shown literally as text');
+  btn.click();
+  await new Promise((r) => window.setTimeout(r, 50));
+  assert.ok(requests.some((u) => u.includes('routing.openstreetmap.de/routed-bike')), 'route requested');
+  assert.strictEqual(d.getElementById('planSummary').hidden, false);
+  assert.ok(/2\.0\d? km|1\.2\d mi/.test(d.getElementById('planSummary').textContent), d.getElementById('planSummary').textContent);
+  const steps = [...d.querySelectorAll('#planSteps .plan-step-text')].map((n) => n.textContent);
+  assert.deepStrictEqual(steps, ['Head out on Elm Street', 'Turn left onto Oak Avenue', 'Arrive at your destination']);
+  assert.strictEqual(d.getElementById('planFollow').hidden, false);
+});
+
+test('Plan: following shows the next turn, flags leaving the route, and ends on arrival', async () => {
+  const d = window.document;
+  let onPos = null, cleared = false;
+  window.navigator.geolocation = {
+    getCurrentPosition: (ok) => ok({ coords: { latitude: planNorth(0), longitude: PLAN_ORIGIN.lon, accuracy: 5 } }),
+    watchPosition: (cb) => { onPos = cb; return 7; },
+    clearWatch: () => { cleared = true; },
+  };
+  const at = (north, east = 0, accuracy = 5) => onPos({ coords: { latitude: planNorth(north), longitude: PLAN_ORIGIN.lon + east, accuracy } });
+  d.getElementById('planFollow').click();
+  await new Promise((r) => window.setTimeout(r, 20));
+  assert.ok(onPos, 'GPS watch started');
+  assert.strictEqual(d.getElementById('planBanner').hidden, false);
+
+  at(700);
+  assert.strictEqual(d.getElementById('planBannerText').textContent, 'Turn left onto Oak Avenue');
+  assert.ok(/3\d\d m|0\.\d+ mi|\d+ ft/.test(d.getElementById('planBannerDist').textContent), d.getElementById('planBannerDist').textContent);
+  assert.ok(d.querySelector('#planSteps .plan-step.current'), 'the next step is highlighted');
+
+  at(900, 0, 200);                                          // too vague a fix: ignored
+  assert.ok(/Turn left/.test(d.getElementById('planBannerText').textContent));
+
+  at(1200, 0.003);                                          // roughly 250 m east of the road
+  assert.strictEqual(d.getElementById('planBannerText').textContent, 'Off the route');
+  assert.strictEqual(d.getElementById('planReroute').hidden, false);
+
+  at(1500);                                                 // back on the route
+  assert.strictEqual(d.getElementById('planReroute').hidden, true);
+  assert.ok(/Arrive/.test(d.getElementById('planBannerText').textContent));
+
+  at(1995);
+  assert.strictEqual(d.getElementById('planBannerText').textContent, 'You have arrived');
+  assert.strictEqual(cleared, true, 'GPS watch released on arrival');
+  assert.strictEqual(d.getElementById('planFollow').textContent, 'Start following');
+});
+
+test('Plan: clearing returns the screen to its empty state', () => {
+  const d = window.document;
+  d.getElementById('planClear').click();
+  assert.strictEqual(d.getElementById('planSummary').hidden, true);
+  assert.strictEqual(d.getElementById('planSteps').children.length, 0);
+  assert.strictEqual(d.getElementById('planTo').value, '');
+});
+
+test('Plan: errors from the network are shown in plain words', async () => {
+  const d = window.document;
+  window.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  d.getElementById('planTo').value = 'anywhere';
+  d.getElementById('planSearch').click();
+  await new Promise((r) => window.setTimeout(r, 50));
+  assert.ok(/could not reach the internet/.test(d.getElementById('planStatus').textContent));
 });
 
 test('page loads no third-party script (the scooter keys live in this origin\'s localStorage)', () => {

@@ -193,6 +193,11 @@ test('a corrupted push frame is rejected', () => {
 });
 
 // ---- interpretation
+test('interpretStatus maps battery current and lifetime energy as raw numbers', () => {
+  const t = P.interpretStatus({ bms_c_cur_rt: 37, bms_accumulated_dc_energy: 437, bms_accumulated_c_energy: 435 });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(t)), { batteryCurrentRaw: 37, energyOutRaw: 437, energyInRaw: 435 });
+});
+
 test('interpretStatus turns the live-style reply into dashboard telemetry', () => {
   const t = P.interpretStatus(V.reads.fast.expected);
   assert.strictEqual(t.speedKPH, 12.3);

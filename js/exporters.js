@@ -64,14 +64,16 @@
 
   /** One row per GPS fix, with the speed the phone's GPS reported. */
   function toRideCSV(ride) {
-    const rows = [csvRow(['time_utc', 'lat', 'lon', 'altitude_m', 'gps_speed_kph'])];
-    for (const p of validPoints(ride)) {
+    const pts = validPoints(ride);
+    const hasCur = pts.some((p) => isNum(p.cur));
+    const rows = [csvRow(['time_utc', 'lat', 'lon', 'altitude_m', 'gps_speed_kph'].concat(hasCur ? ['battery_current_raw'] : []))];
+    for (const p of pts) {
       rows.push(csvRow([
         isNum(p.timestamp) ? iso(p.timestamp) : '',
         p.lat.toFixed(6), p.lon.toFixed(6),
         isNum(p.altitude) && p.altitude !== 0 ? round(p.altitude, 1) : '',
         isNum(p.speedMPS) ? round(p.speedMPS * 3.6, 1) : '',
-      ]));
+      ].concat(hasCur ? [isNum(p.cur) ? p.cur : ''] : [])));
     }
     return rows.join('\r\n') + '\r\n';
   }
