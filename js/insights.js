@@ -5,6 +5,10 @@
  * elevation, battery used, efficiency, a range estimate, and route colouring.
  * No DOM, no storage — fully unit tested in test/insights.test.js.
  *
+ * Speeds come from the phone's own speed reading (CoreLocation/Doppler) when the ride has
+ * one, because differencing positions turns ordinary GPS jumps into 60+ km/h "speeds" (seen on
+ * a real ride). Position-derived speed is only the fallback.
+ *
  * Honesty notes baked into the maths:
  *  - Battery % is a whole number, so a ride's "battery used" is only ±1%. The
  *    range estimate therefore pools several rides (ratio of sums) instead of
@@ -21,7 +25,8 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   const METERS_PER_MILE = 1609.344;
-  const MOVING_MPS = 0.5;          // slower than this between GPS fixes counts as stopped
+  const MOVING_MPS = 0.5;          // position-derived speed below this counts as stopped
+  const MOVING_MPS_READING = 0.8;  // the phone's own speed reading is noisier at a standstill (~1 km/h), so it needs a higher bar
   const MAX_GAP_SECONDS = 30;      // longer gaps are lost signal, not riding or stopping
   const ELEVATION_NOISE_METERS = 3;
   // cool -> hot, by share of the scooter's top speed
@@ -42,8 +47,20 @@
     return (points || []).filter((p) => p && isNum(p.lat) && isNum(p.lon) && isNum(p.timestamp));
   }
 
-  /** Per-segment facts between consecutive GPS fixes. */
+  /** True when the ride carries the phone's own speed readings (geo.js stores 0 when it had none). */
+  function hasSpeedReadings(points) {
+    return points.some((p) => isNum(p.speedMPS) && p.speedMPS > 0.3);
+  }
+
+  /**
+   * Per-segment facts between consecutive GPS fixes.
+   *   mps    speed implied by the position change (noisy: GPS jumps look like huge speeds)
+   *   speed  the best estimate: the phone's own reading averaged over the segment if the ride
+   *          has readings, else mps
+   *   gap    lost signal, or a recorded position step: not real movement, excluded from stats
+   */
   function segments(points) {
+    const readings = hasSpeedReadings(points);
     const out = [];
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1];
@@ -51,7 +68,9 @@
       const seconds = (b.timestamp - a.timestamp) / 1000;
       if (seconds <= 0) continue;
       const meters = distanceMeters(a.lat, a.lon, b.lat, b.lon);
-      out.push({ a, b, seconds, meters, mps: meters / seconds, gap: seconds > MAX_GAP_SECONDS });
+      const mps = meters / seconds;
+      const speed = readings ? ((a.speedMPS || 0) + (b.speedMPS || 0)) / 2 : mps;
+      out.push({ a, b, seconds, meters, mps, speed, readings, gap: seconds > MAX_GAP_SECONDS || b.jump === true });
     }
     return out;
   }
@@ -70,13 +89,13 @@
     return { gainMeters: Math.round(gain), lossMeters: Math.round(loss) };
   }
 
-  /** Highest speed after smoothing over 3 segments (reduces ordinary GPS noise; geo.js already drops poor-accuracy fixes). */
+  /** Highest speed after smoothing over 3 segments (reduces ordinary noise in either kind of speed). */
   function gpsMaxKph(segs) {
     const live = segs.filter((s) => !s.gap);
-    if (live.length < 3) return live.length ? Math.max(...live.map((s) => s.mps)) * 3.6 : null;
+    if (live.length < 3) return live.length ? Math.max(...live.map((s) => s.speed)) * 3.6 : null;
     let best = 0;
     for (let i = 2; i < live.length; i++) {
-      best = Math.max(best, (live[i - 2].mps + live[i - 1].mps + live[i].mps) / 3);
+      best = Math.max(best, (live[i - 2].speed + live[i - 1].speed + live[i].speed) / 3);
     }
     return best * 3.6;
   }
@@ -90,10 +109,10 @@
     const segs = segments(pts);
     let movingSeconds = 0;
     let stoppedSeconds = 0;
-    let movingMeters = 0;
+    let movingSpeedSeconds = 0;       // sum of speed x time over moving segments, for a time-weighted mean
     for (const s of segs) {
       if (s.gap) continue;
-      if (s.mps >= MOVING_MPS) { movingSeconds += s.seconds; movingMeters += s.meters; }
+      if (s.speed >= (s.readings ? MOVING_MPS_READING : MOVING_MPS)) { movingSeconds += s.seconds; movingSpeedSeconds += s.speed * s.seconds; }
       else stoppedSeconds += s.seconds;
     }
     const hasBattery = isNum(ride.startSOC) && isNum(ride.endSOC) && ride.startSOC >= ride.endSOC;
@@ -102,7 +121,7 @@
     return {
       movingSeconds: Math.round(movingSeconds),
       stoppedSeconds: Math.round(stoppedSeconds),
-      avgMovingKph: movingSeconds > 0 ? (movingMeters / movingSeconds) * 3.6 : null,
+      avgMovingKph: movingSeconds > 0 ? (movingSpeedSeconds / movingSeconds) * 3.6 : null,
       gpsMaxKph: gpsMaxKph(segs),
       scooterTopKph: isNum(ride.topSpeedKPH) && ride.topSpeedKPH > 0 ? ride.topSpeedKPH : null,
       elevation: elevationChange(pts),
@@ -153,7 +172,7 @@
   function colouredRoute(points, maxKph) {
     const out = [];
     for (const s of segments(validPoints(points))) {
-      const color = speedColor(s.mps * 3.6, maxKph);
+      const color = speedColor(s.speed * 3.6, maxKph);
       const last = out[out.length - 1];
       const from = [s.a.lat, s.a.lon];
       const to = [s.b.lat, s.b.lon];
