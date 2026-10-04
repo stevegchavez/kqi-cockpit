@@ -16,6 +16,7 @@ is blank only because the sandbox had no network for map tiles):
 
 ## What it does and doesn't do
 
+- **Speed dial** fills left to right and shifts green → yellow → red with speed, as an *estimate* of efficiency (energy use per km rises steeply with speed). It is based on speed alone; no live power/current field has been confirmed on the 200F yet.
 - **Reads** status from the scooter over Bluetooth: speed, battery %, battery health, charge
   cycle count, powered on/off, fault code, top speed, rated voltage.
 - **Keeps a battery history** on the device: battery %, health, charge cycles and power state
