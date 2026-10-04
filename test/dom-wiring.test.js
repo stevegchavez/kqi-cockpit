@@ -118,6 +118,34 @@ test('gauge initializes with a track path, a value path, and tick marks', () => 
   assert.strictEqual(ticks.children.length, 11, 'expected 11 tick marks around the gauge');
 });
 
+test('gauge value arc starts at the left and runs over the top to the right', () => {
+  const d = window.document.getElementById('gaugeValue').getAttribute('d');
+  const [, x0, , , , , , , sweep, x1] = d.split(' ');
+  assert.ok(Number(x0) < 100 && Number(x1) > 100, `arc should run left to right, got: ${d}`);
+  assert.strictEqual(sweep, '1', 'clockwise sweep so the fill grows left to right');
+});
+
+test('gauge colour ramp runs green to red, with stops inside the gradient range', () => {
+  const doc = window.document;
+  const stops = ['effStop1', 'effStop2', 'effStop3'].map((id) => Number(doc.getElementById(id).getAttribute('offset')));
+  assert.ok(stops[0] < stops[1] && stops[1] < stops[2], `stops should increase: ${stops}`);
+  assert.ok(stops.every((o) => o > 0 && o < 1));
+  const colours = [...doc.querySelectorAll('#gaugeGrad stop')].map((n) => n.getAttribute('stop-color'));
+  assert.ok(/^#[0-9a-f]{2}/i.test(colours[0]) && colours[0].toLowerCase().startsWith('#3d') , 'starts green');
+  assert.strictEqual(colours[colours.length - 1].toLowerCase(), '#ff3b30', 'ends red');
+});
+
+test('efficiency label follows speed: efficient, moderate, high drain', async () => {
+  const doc = window.document;
+  const label = doc.getElementById('effLabel');
+  doc.getElementById('demoToggleBtn').click();
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 120)); if (label.textContent) seen.add(label.dataset.zone); }
+  doc.getElementById('demoToggleBtn').click();
+  assert.ok(seen.size >= 1, 'label should be filled while the simulation moves');
+  assert.ok([...seen].every((z) => ['good', 'fair', 'poor'].includes(z)));
+});
+
 test('battery cell strip renders 10 segments after simulated telemetry', () => {
   window.document.getElementById('demoToggleBtn').click(); // start
   const cells = window.document.getElementById('cellStrip').children;

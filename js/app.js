@@ -20,7 +20,12 @@
   let gaugeMaxKph = 32;
   const GAUGE_START_ANGLE = -130; // degrees, 0 = 12 o'clock, clockwise positive
   const GAUGE_END_ANGLE = 130;
-  const GAUGE_REDLINE_PCT = 0.85;
+  // Efficiency zones as a share of the gauge: a scooter's energy use per km climbs steeply with
+  // speed (air drag), so the low end of the dial is the efficient end. This is an estimate from
+  // speed alone; no live power or current field has been confirmed on the 200F yet.
+  const EFF_GOOD_PCT = 0.45;   // up to here: green
+  const EFF_FAIR_PCT = 0.70;   // up to here: yellow, then orange; beyond EFF_POOR_PCT: red
+  const EFF_POOR_PCT = 0.85;
   const CELL_COUNT = 10;
 
   const state = {
@@ -79,7 +84,9 @@
     const start = polarToCartesian(cx, cy, r, endAngle);
     const end = polarToCartesian(cx, cy, r, startAngle);
     const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
-    return ['M', start.x, start.y, 'A', r, r, 0, largeArcFlag, 0, end.x, end.y].join(' ');
+    // Drawn from the start angle round to the end angle (left to right over the top), so the
+    // value arc fills in the direction the needle would move.
+    return ['M', end.x, end.y, 'A', r, r, 0, largeArcFlag, 1, start.x, start.y].join(' ');
   }
 
   const GAUGE_CX = 100, GAUGE_CY = 100, GAUGE_R = 86;
@@ -89,6 +96,11 @@
     const d = describeArc(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_ANGLE, GAUGE_END_ANGLE);
     gaugeTrack.setAttribute('d', d);
     gaugeValue.setAttribute('d', d);
+    // Colour ramp along the arc, with each stop at the horizontal position of its speed zone
+    // (the gradient is horizontal, x 34..186, so the stops are converted from arc angle to x).
+    const xAt = (pct) => GAUGE_CX + GAUGE_R * Math.sin(((GAUGE_START_ANGLE + (GAUGE_END_ANGLE - GAUGE_START_ANGLE) * pct) * Math.PI) / 180);
+    const stopAt = (id, pct) => { const s = el(id); if (s) s.setAttribute('offset', String(Math.max(0, Math.min(1, (xAt(pct) - 34) / 152)))); };
+    stopAt('effStop1', EFF_GOOD_PCT); stopAt('effStop2', EFF_FAIR_PCT); stopAt('effStop3', EFF_POOR_PCT);
     // In a browser, getTotalLength() gives the real path length for the
     // dasharray/dashoffset reveal technique. jsdom doesn't implement SVG
     // geometry, so guard for that environment rather than throwing there.
@@ -116,7 +128,12 @@
   function setGaugePercent(pct) {
     pct = Math.max(0, Math.min(1, pct));
     gaugeValue.style.strokeDashoffset = String(gaugeArcLength * (1 - pct));
-    gaugeValue.classList.toggle('redline', pct >= GAUGE_REDLINE_PCT);
+    const zone = pct <= 0.02 ? '' : pct <= EFF_GOOD_PCT ? 'good' : pct <= EFF_FAIR_PCT ? 'fair' : 'poor';
+    const label = el('effLabel');
+    if (label) {
+      label.textContent = { good: 'Efficient', fair: 'Moderate', poor: 'High drain' }[zone] || '';
+      label.dataset.zone = zone;
+    }
   }
 
   /** Plays a brief 0→max→actual sweep, like a car dash powering on. */
