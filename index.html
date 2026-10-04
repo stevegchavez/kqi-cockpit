@@ -32,6 +32,16 @@
 
     <div class="gauge-wrap">
       <svg viewBox="0 0 200 200">
+        <defs>
+          <linearGradient id="gaugeGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stop-color="#ffd36b"/><stop offset="0.55" stop-color="#ffb020"/><stop offset="1" stop-color="#ff6a2a"/>
+          </linearGradient>
+          <radialGradient id="gaugeDisc" cx="50%" cy="45%" r="60%">
+            <stop offset="0" stop-color="#23262c"/><stop offset="0.7" stop-color="#121418"/><stop offset="1" stop-color="#0a0b0d"/>
+          </radialGradient>
+        </defs>
+        <circle class="gauge-disc" cx="100" cy="100" r="76"></circle>
+        <circle class="gauge-halo" cx="100" cy="100" r="92"></circle>
         <path id="gaugeTrack" class="gauge-track"></path>
         <path id="gaugeValue" class="gauge-value"></path>
         <g id="gaugeTicks"></g>
@@ -127,6 +137,9 @@
         <button id="clearKeysBtn" class="btn">Remove keys</button>
       </div>
       <div id="keysStatus" class="keys-status" role="status">No keys saved</div>
+      <h3 class="diag-entry-title">Diagnostics (advanced)</h3>
+      <p class="hint">Find out which values your scooter reports, compare them before and after you do something, and export a report to share. Read-only.</p>
+      <button id="openDiagBtn" class="btn">Open Diagnostics</button>
       <p class="hint small">Read-only: this app only reads status from your scooter and never sends commands. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
     </div>
   </section>
@@ -175,6 +188,50 @@
     </div>
   </div>
 
+  <!-- ================= Diagnostics overlay ================= -->
+  <div id="diagScreen">
+    <div class="diag-header">
+      <button id="closeDiagBtn" class="back-btn" aria-label="Close diagnostics">&lsaquo;</button>
+      <span class="diag-title">Diagnostics</span>
+      <span style="width:38px"></span>
+    </div>
+    <div class="diag-body">
+      <p class="hint">Read-only. This only asks the scooter to <em>report</em> values; it never changes anything. Passwords, PINs, NFC cards and command registers are skipped entirely. Serial numbers, MAC addresses and similar are hidden here and always removed from exports.</p>
+      <div id="diagStatus" class="diag-status" role="status">Not connected.</div>
+      <progress id="scanProgress" class="diag-progress" max="1" value="0"></progress>
+
+      <div class="diag-actions">
+        <button id="scanBtn" class="btn small">Scan all fields</button>
+        <button id="cancelScanBtn" class="btn small" style="display:none">Cancel</button>
+      </div>
+      <div class="diag-actions">
+        <button id="snapABtn" class="btn small">Snapshot A</button>
+        <button id="snapBBtn" class="btn small">Snapshot B</button>
+        <button id="compareBtn" class="btn small">Compare</button>
+        <button id="watchBtn" class="btn small">Start watching</button>
+      </div>
+      <textarea id="diagNote" class="diag-note" rows="2" maxlength="500" placeholder="What did you do? e.g. A: headlight off, B: headlight on. This note goes in the report."></textarea>
+
+      <div id="diagSummary" class="diag-summary">No scan yet.</div>
+      <h4 class="chart-title">Changes</h4>
+      <div id="diagChanges" class="diag-table"></div>
+
+      <h4 class="chart-title">Fields</h4>
+      <div class="diag-filters">
+        <input id="diagFilter" type="search" placeholder="Filter by name" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <label><input id="answeredOnlyCheck" type="checkbox" checked /> answered only</label>
+        <label><input id="revealCheck" type="checkbox" /> show identifiers</label>
+      </div>
+      <div id="diagResults" class="diag-table"></div>
+
+      <div class="diag-actions">
+        <button id="previewDiagBtn" class="btn small">Preview report</button>
+        <button id="exportDiagBtn" class="btn small">Export report</button>
+      </div>
+      <textarea id="diagPreview" class="diag-preview" readonly rows="14" style="display:none"></textarea>
+    </div>
+  </div>
+
   <div id="toast"></div>
 </div>
 
@@ -190,6 +247,9 @@
 <script src="js/exporters.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/battery.js"></script>
+<script src="js/fields.js"></script>
+<script src="js/diagnostics.js"></script>
+<script src="js/diag-ui.js"></script>
 <script src="js/geo.js"></script>
 <script src="js/app.js"></script>
 </body>

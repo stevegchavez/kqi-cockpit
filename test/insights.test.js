@@ -180,4 +180,46 @@ test('coloured route is empty for fewer than two fixes and breaks at signal gaps
   assert.ok(route.length >= 2, 'a gap must not be joined into one continuous line');
 });
 
+// ---- phone speed readings and position steps (found on a real ride) ----
+test('speeds come from the phone reading when present, not from jumpy positions', () => {
+  // Steady 5 m/s (18 km/h) reading, but one fix lands 17 m ahead (a GPS blip).
+  const pts = track([[40, 5]]).map((p) => ({ ...p, speedMPS: 5 }));
+  for (let i = 20; i < pts.length; i++) pts[i] = { ...pts[i], lat: pts[i].lat + 17 / M_PER_DEG_LAT };
+  const s = I.rideStats({ points: pts, distanceMeters: distance(pts) });
+  near(s.gpsMaxKph, 18, 0.5, 'top speed follows the reading');
+  near(s.avgMovingKph, 18, 0.5, 'average follows the reading');
+});
+
+test('a ride whose readings are all zero falls back to position-derived speed', () => {
+  const pts = track([[30, 6]]);
+  const s = I.rideStats({ points: pts, distanceMeters: distance(pts) });
+  near(s.gpsMaxKph, 21.6, 0.5, 'fallback top speed');
+});
+
+test('the reading is trusted less at a standstill: ~1 km/h of noise counts as stopped', () => {
+  const pts = track([[30, 5], [30, 0]]);
+  pts.forEach((p, i) => { p.speedMPS = i < 30 ? 5 : 0.3; });     // 0.3 m/s ~ 1 km/h of reading noise
+  const s = I.rideStats({ points: pts, distanceMeters: distance(pts) });
+  assert.ok(s.stoppedSeconds >= 28, `stopped ${s.stoppedSeconds}`);
+  near(s.avgMovingKph, 18, 0.7, 'standstill noise must not drag the moving average');
+});
+
+test('a flagged position step is treated as a gap, not as movement', () => {
+  const pts = track([[30, 5]]).map((p) => ({ ...p, speedMPS: 5 }));
+  for (let i = 15; i < pts.length; i++) pts[i] = { ...pts[i], lat: pts[i].lat + 17 / M_PER_DEG_LAT };
+  pts[15] = { ...pts[15], jump: true };
+  const segs = I.segments(pts);
+  assert.strictEqual(segs.filter((s) => s.gap).length, 1);
+  near(I.rideStats({ points: pts, distanceMeters: distance(pts) }).gpsMaxKph, 18, 0.5, 'the step must not set the top speed');
+});
+
+test('real ride (relocated): top speed matches the phone reading, not the GPS jumps', () => {
+  const fs = require('fs');
+  const rows = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'fixtures', 'real-ride-relocated.json'), 'utf8')).rows;
+  const pts = rows.map(([ms, lat, lon, alt, kph]) => ({ lat, lon, altitude: alt, speedMPS: kph / 3.6, timestamp: 1e12 + ms }));
+  const s = I.rideStats({ points: pts, distanceMeters: distance(pts) });
+  assert.ok(s.gpsMaxKph > 27 && s.gpsMaxKph < 31, `top speed ${s.gpsMaxKph}`);
+  assert.ok(s.avgMovingKph > 21 && s.avgMovingKph < 24.5, `average ${s.avgMovingKph}`);
+});
+
 console.log(`\n${passed} passed`);

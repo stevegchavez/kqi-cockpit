@@ -71,5 +71,68 @@ out["decode"] = {
     "UTF8": P.decode_value({"type": "UTF-8", "len": 8}, "4b32433246563332"),
     "UTF8_nulpad": P.decode_value({"type": "UTF-8", "len": 8}, "4b32430000000000"),
 }
+
+# ---- Diagnostics: every field type, against the full catalogue (js/fields.js is generated from the same table)
+import struct
+def enc(name, value):
+    """Field value -> hex, via the reference implementation."""
+    return P.encode_value(P.FIELDS[name], value)
+
+def pick(typ, n=1):
+    return [k for k, v in sorted(P.FIELDS.items()) if v["type"] == typ][:n]
+
+diag_groups = {
+    "ints":   ["bms_soc_rt", "foc_k_rt_speed", "db_k_realtime_status"],
+    "signed": pick("S8", 1) + pick("S16", 1) + pick("S32", 1),
+    "floats": pick("F32", 2),
+    "hex":    ["ble_mac", "db_left_menu_set", "db_usrdef_voice1"],
+    "bigHex": ["db_island_notification"],                 # 128 bytes -> an eight-frame reply
+    "text":   ["db_k_sw_ver", "foc_k_s_ver", "bms_s_ver_n"],
+}
+sample = {
+    "bms_soc_rt": 59, "foc_k_rt_speed": 123, "db_k_realtime_status": 4325377, "db_k_sw_ver": "K2C2FV32",
+    "foc_k_s_ver": "KDE13G07", "bms_s_ver_n": "K3D66V02",
+}
+out["diag"] = {}
+for gname, names in diag_groups.items():
+    vals_hex = ""
+    raws = {}
+    for i, n in enumerate(names):
+        spec = P.FIELDS[n]
+        if n in sample:
+            h = enc(n, sample[n])
+        elif spec["type"] in ("S8", "S16", "S32"):
+            h = enc(n, -(i + 2))                       # negative on purpose
+        elif spec["type"] == "F32":
+            h = struct.pack(">f", [1.5, -2.25, 100.125][i % 3]).hex()
+        elif spec["type"] == "HEX":
+            h = bytes((0xA0 + i + j) & 0xFF for j in range(spec["len"])).hex()
+        else:
+            h = enc(n, i + 1)
+        raws[n] = h
+        vals_hex += h
+    frames = P.build_chunked("01a1", "0181", vals_hex, AES)
+    out["diag"][gname] = {
+        "names": names,
+        "types": {n: P.FIELDS[n]["type"] for n in names},
+        "request": P.build_read(names, AES),
+        "replyFrames": frames,
+        "expected": P.parse_read_frames(frames, names, AES),
+        "raws": raws,
+    }
+
+# a push frame: coded pairs in one encrypted block
+push_plain = "21000903" + "21000b00c8"
+push_plain += "0" * (32 - len(push_plain))
+pf = "0127" + "00" + P.aes_enc(push_plain, AES)
+# The reference keeps trailing zero padding as a bogus code_000000 entry; the JS port stops at padding on purpose.
+def _no_padding(d):
+    return {k: v for k, v in d.items() if k != "code_000000"}
+out["push"] = {"frame": pf + P.checksum(pf), "expected": _no_padding(P.parse_push(pf + P.checksum(pf), AES))}
+unk_plain = "21000903" + "ABCDEF" + "0102"
+unk_plain += "0" * (32 - len(unk_plain))
+uf = "0127" + "00" + P.aes_enc(unk_plain, AES)
+out["pushUnknown"] = {"frame": uf + P.checksum(uf), "expected": _no_padding(P.parse_push(uf + P.checksum(uf), AES))}
+
 json.dump(out, sys.stdout, indent=1, sort_keys=True)
 print()
