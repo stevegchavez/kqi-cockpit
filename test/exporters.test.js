@@ -52,6 +52,15 @@ test('GPX skips malformed points instead of writing NaN', () => {
   assert.strictEqual(parseXml(xml).getElementsByTagName('trkpt').length, 1);
 });
 
+test('ride CSV adds a battery_current_raw column only when the ride recorded it', () => {
+  const r = ride();
+  r.points = r.points.map((p, i) => ({ ...p, cur: i === 0 ? 12 : undefined }));
+  const lines = E.toRideCSV(r).trim().split('\r\n');
+  assert.strictEqual(lines[0], 'time_utc,lat,lon,altitude_m,gps_speed_kph,battery_current_raw');
+  assert.ok(lines[1].endsWith(',12'));
+  assert.ok(lines[2].endsWith(','), 'a fix with no reading leaves the cell empty');
+});
+
 test('ride CSV has a header, one row per fix, and speed in km/h', () => {
   const lines = E.toRideCSV(ride()).trim().split('\r\n');
   assert.strictEqual(lines[0], 'time_utc,lat,lon,altitude_m,gps_speed_kph');

@@ -30,7 +30,7 @@
 
   const state = {
     unit: localStorage.getItem('niu.unit') || 'mph', // display preference only, not ride data
-    scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null },
+    scooter: { speedKPH: 0, batterySOC: 0, faultFlags: 0, batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null, batteryCurrentRaw: null, energyOutRaw: null, energyInRaw: null },
     rides: [],                 // cached saved rides, for the range estimate
     haveBattery: false,        // true once a REAL battery reading has arrived this connection
     lastBatterySample: null,
@@ -193,7 +193,7 @@
 
   ble.addEventListener('connected', (e) => {
     // Forget values from a previous connection or from demo mode; fresh reads fill these in.
-    Object.assign(state.scooter, { batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null });
+    Object.assign(state.scooter, { batteryHealth: null, poweredOn: null, maxSpeedKPH: null, chargeCycles: null, batteryCurrentRaw: null, energyOutRaw: null, energyInRaw: null });
     statusLabel.textContent = e.detail.name || 'Scooter connected';
     playIgnitionSequence();
   });
@@ -294,6 +294,13 @@
     powerVal.className = 'v ' + (s.poweredOn == null ? 'off' : (s.poweredOn ? 'on' : 'off'));
     maxSpeedVal.textContent = s.maxSpeedKPH == null ? '\u2013' : Math.round(kphToDisplay(s.maxSpeedKPH));
     cyclesVal.textContent = s.chargeCycles == null ? '\u2013' : String(s.chargeCycles);
+    const draw = el('drawLine');
+    if (draw) {
+      const parts = [];
+      if (s.batteryCurrentRaw != null) parts.push(`Battery current (raw): <b>${s.batteryCurrentRaw}</b>`);
+      if (s.energyOutRaw != null) parts.push(`Lifetime energy out/in (raw): <b>${s.energyOutRaw}</b> / <b>${s.energyInRaw == null ? '\u2013' : s.energyInRaw}</b>`);
+      draw.innerHTML = parts.join(' &nbsp;·&nbsp; ');   // numbers only: built from integers read off the scooter
+    }
   }
 
   // ---------- Unit toggle ----------
@@ -371,8 +378,11 @@
     showToast('Ride saved');
   }
 
-  geo.addEventListener('point', () => {
+  geo.addEventListener('point', (e) => {
     if (!state.isRiding) return;
+    // Stamp the scooter's raw battery-current reading on the fix, so a ride export can show how
+    // the draw varies with speed (units still being worked out).
+    if (state.scooter.batteryCurrentRaw != null && !state.rideSimulated) e.detail.cur = state.scooter.batteryCurrentRaw;
     tripDist.textContent = metersToDisplayDistance(geo.distanceMeters).toFixed(2);
   });
 
@@ -396,11 +406,29 @@
     }, 400);
   });
 
+  // ---------- Trip planning ----------
+  const planUI = NIU.PlanUI.init({
+    showToast,
+    getContext: () => {
+      const real = (state.rides || []).filter((r) => !r.simulated).slice(0, 10);
+      const speeds = real.map((r) => NIU.Insights.rideStats(r).avgMovingKph).filter((x) => Number.isFinite(x) && x > 3);
+      const est = NIU.Insights.rangeEstimate(state.rides, null);
+      return {
+        soc: state.haveBattery ? state.scooter.batterySOC : null,
+        milesPerPct: est ? est.milesPerPct : null,
+        avgMovingKph: speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : null,
+        maxKph: state.scooter.maxSpeedKPH || 30,
+        useMiles: state.unit === 'mph',
+      };
+    },
+  });
+
   // ---------- Tab navigation ----------
   function showTab(target) {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.target === target));
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
     el(target).classList.add('active');
+    if (target === 'planScreen' && planUI) planUI.onShow();
     if (target === 'ridesScreen') renderRidesList();
     if (target === 'batteryScreen') renderBatteryScreen();
   }
