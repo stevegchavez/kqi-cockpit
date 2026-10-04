@@ -652,3 +652,150 @@ body {
 .plan-banner .btn { margin-top: 10px; width: 100%; }
 [hidden] { display: none !important; }
 .tab-btn { font-size: 10px; }
+
+/* ============================================================
+   Design pass 2: cockpit header, compact layout, ride cards,
+   setup cards, plan empty state.
+   ============================================================ */
+
+/* ---------- Cockpit header ---------- */
+.cockpit-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: env(safe-area-inset-top, 8px);
+}
+.brand { display: flex; align-items: baseline; gap: 7px; }
+.brand-mark {
+  font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 26px; letter-spacing: .5px; line-height: 1;
+  background: linear-gradient(135deg, #ffd36b, #ff8f1f); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 8px rgba(255,160,30,0.35));
+}
+.brand-sub { font-size: 10px; font-weight: 700; letter-spacing: 2.4px; text-transform: uppercase; color: var(--graphite); }
+.cockpit-head .banner { margin-top: 0; padding: 6px 12px; font-size: 12px; gap: 7px; max-width: 62%; }
+.cockpit-head .banner #statusLabel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.connect-cta { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; padding: 12px 14px; }
+
+/* ---------- Gauge numbers ---------- */
+.gauge-num {
+  fill: #8a8f97; font-family: "Space Grotesk", sans-serif; font-size: 8.5px; font-weight: 600;
+  text-anchor: middle; font-variant-numeric: tabular-nums;
+}
+.gauge-wrap { width: min(72vw, 296px); margin-top: 6px; }
+
+/* ---------- Battery card ---------- */
+.battery-module {
+  margin-top: 8px; padding: 14px 14px 12px; border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: linear-gradient(160deg, rgba(255,255,255,0.055), rgba(255,255,255,0.012));
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.battery-head { margin-bottom: 9px; align-items: center; }
+.battery-head .label { font-size: 10px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--graphite); }
+.battery-head .pct { font-size: 30px; line-height: 1; }
+.cell-strip { height: 16px; gap: 3px; }
+.range-line { font-size: 12px; margin-top: 9px; min-height: 0; }
+.range-line:empty { display: none; }
+#drawLine { margin-top: 4px; font-size: 10.5px; opacity: .75; }
+
+/* Trip numbers only matter while riding; outside a ride they would just read zero. */
+#cockpitScreen:not(.riding) .trip-strip { display: none; }
+#cockpitScreen.riding .trip-strip { border-color: rgba(255,68,56,0.35); box-shadow: 0 0 22px rgba(255,68,56,0.12), inset 0 1px 0 rgba(255,255,255,0.06); }
+.instrument-strip { margin-top: 10px; }
+.info-strip .readout { padding: 10px 2px; }
+.info-strip .t { letter-spacing: 1px; }
+
+/* ---------- Titles with an action ---------- */
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.btn.ghost { background: transparent; border-color: rgba(255,255,255,0.12); color: var(--paper); box-shadow: none; padding: 8px 14px; font-size: 12.5px; }
+.btn.ghost:active { border-color: var(--ember); color: var(--ember); }
+#exportAllBtn { margin: 0; align-self: center; padding-top: calc(env(safe-area-inset-top, 8px) + 2px); padding-top: 8px; }
+.title-row .screen-title { margin-bottom: 0; }
+
+/* ---------- Ride cards ---------- */
+.rides-summary { margin: 12px 0 4px; }
+.rides-summary .v { font-size: 26px; }
+.rides-list { margin-top: 10px; }
+.ride-row {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto 34px; align-items: center; gap: 12px;
+  padding: 10px 10px 10px 10px; cursor: pointer; transition: transform .12s ease, border-color .2s ease;
+}
+.ride-row:active { transform: scale(.985); border-color: rgba(255,176,32,0.35); }
+.route-thumb {
+  width: 56px; height: 56px; border-radius: 12px; display: block;
+  background:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 11px 11px,
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 11px 11px,
+    #101215;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.ride-row .when { min-width: 0; }
+.ride-row .when .date { font-size: 14.5px; }
+.ride-row .when .time { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ride-row .metrics .dist { white-space: nowrap; line-height: 1; }
+.ride-row .metrics .dist small { font-family: "Space Grotesk", sans-serif; font-size: 11px; font-weight: 600; color: var(--graphite); margin-left: 3px; }
+.ride-row .delete-btn {
+  width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  color: var(--graphite); background: transparent; transition: background .2s ease, color .2s ease;
+}
+.ride-row .delete-btn.armed { background: var(--redline); color: #fff; box-shadow: 0 0 14px rgba(255,68,56,0.6); }
+.ride-row.simulated { opacity: .7; }
+.ride-row.simulated .date::after {
+  content: "demo"; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 9.5px; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--graphite); border: 1px solid var(--line); vertical-align: 2px;
+}
+
+/* ---------- Setup cards ---------- */
+.setup-card { margin-top: 10px; padding-bottom: 16px; }
+.card {
+  padding: 16px; margin-bottom: 12px; border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.012));
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.card.quiet { background: transparent; box-shadow: none; border-style: dashed; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.card-head h3 { margin: 0 !important; font-size: 20px !important; }
+.chip {
+  display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase; border: 1px solid var(--line); color: var(--graphite);
+}
+.chip.ok { color: #4fe07a; border-color: rgba(79,224,122,0.35); background: rgba(79,224,122,0.08); }
+.btn.wide { width: 100%; flex: none; }
+.keys-status { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12.5px; }
+.keys-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--graphite); flex: none; }
+.keys-status.ok { border-color: rgba(94,200,216,0.35); background: rgba(94,200,216,0.08); }
+.keys-status.ok::before { background: var(--signal); box-shadow: 0 0 8px var(--signal); }
+.keys-status.err { border-color: rgba(255,68,56,0.35); background: var(--redline-dim); border-radius: 12px; }
+.keys-status.err::before { background: var(--redline); }
+
+/* ---------- Plan empty state and details ---------- */
+.plan-empty { text-align: center; padding: 26px 18px 10px; color: var(--graphite); }
+.plan-empty h3 { margin: 8px 0 6px; color: var(--paper); font-family: "Big Shoulders Display", sans-serif; font-size: 24px; font-weight: 700; }
+.plan-empty p { margin: 0 auto; max-width: 290px; font-size: 13px; line-height: 1.5; }
+.plan-empty-art svg { width: 150px; height: 100px; }
+.plan-empty-art .route { stroke: url(#none); stroke: #ffb020; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 2 9; filter: drop-shadow(0 0 6px rgba(255,176,32,0.6)); animation: march 1.6s linear infinite; }
+.plan-empty-art .a { fill: #5ec8d8; filter: drop-shadow(0 0 6px rgba(94,200,216,0.8)); }
+.plan-empty-art .b { fill: #ff4438; filter: drop-shadow(0 0 8px rgba(255,68,56,0.8)); }
+@keyframes march { to { stroke-dashoffset: -22; } }
+.plan-status:empty { min-height: 0; margin: 0; }
+.plan-about { margin: 16px 0 18px; border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; }
+.plan-about summary { cursor: pointer; padding: 12px 0; font-size: 13px; font-weight: 600; color: var(--graphite); list-style: none; display: flex; justify-content: space-between; }
+.plan-about summary::-webkit-details-marker { display: none; }
+.plan-about summary::after { content: "+"; font-size: 16px; line-height: 1; }
+.plan-about[open] summary::after { content: "–"; }
+.plan-about p { margin: 0 0 12px; }
+
+/* Short phones: keep the ride button on screen. */
+@media (max-height: 760px) {
+  .gauge-wrap { width: min(60vw, 240px); }
+  .battery-module { padding: 11px 12px 10px; }
+  .battery-head .pct { font-size: 24px; }
+}
+.no-track {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  color: var(--graphite); font-size: 13px; text-align: center; padding: 0 30px;
+  background:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--ink);
+}
+.no-track[hidden] { display: none; }

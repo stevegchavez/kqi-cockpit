@@ -123,6 +123,25 @@
       frag.appendChild(line);
     }
     gaugeTicks.appendChild(frag);
+    renderGaugeLabels();
+  }
+
+  /** Round speed numbers just inside the arc (5s up to 25, else 10s), in the chosen unit. */
+  function renderGaugeLabels() {
+    const g = el('gaugeLabels');
+    if (!g) return;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    const max = kphToDisplay(gaugeMaxKph);
+    const step = max <= 25 ? 5 : 10;
+    for (let v = 0; v <= max + 0.01; v += step) {
+      const angle = GAUGE_START_ANGLE + (GAUGE_END_ANGLE - GAUGE_START_ANGLE) * (v / max);
+      const p = polarToCartesian(GAUGE_CX, GAUGE_CY, GAUGE_R - 19, angle);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', p.x.toFixed(1)); t.setAttribute('y', (p.y + 3).toFixed(1));
+      t.setAttribute('class', 'gauge-num');
+      t.textContent = String(v);
+      g.appendChild(t);
+    }
   }
 
   function setGaugePercent(pct) {
@@ -170,6 +189,12 @@
     const s = Math.floor(seconds % 60);
     return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
   }
+  /** Coarser total for summaries: "2h 05m" or "45m". */
+  function formatHours(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.round((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+  }
   function showToast(msg) {
     toast.textContent = msg;
     toast.classList.add('visible');
@@ -182,12 +207,12 @@
     const s = e.detail;
     dot.className = `dot ${s}`;
     statusLabel.textContent = {
-      disconnected: 'Disconnected — tap to connect',
+      disconnected: 'Not connected',
       connecting: 'Connecting…',
       connected: 'Connected',
-      unsupported: 'Web Bluetooth unavailable — use Bluefy on iOS',
+      unsupported: 'No Bluetooth here',
     }[s] || s;
-    connectBtn.style.display = s === 'connected' ? 'none' : 'block';
+    connectBtn.style.display = s === 'connected' ? 'none' : 'flex';
     rideBtn.disabled = s !== 'connected' && !state.demoTimer;
   });
 
@@ -239,7 +264,10 @@
     if (t.faultFlags !== undefined) {
       faultLabel.style.display = t.faultFlags === 0 ? 'none' : 'flex';
     }
-    if (t.maxSpeedKPH) gaugeMaxKph = Math.max(10, Math.ceil(t.maxSpeedKPH * 1.1));
+    if (t.maxSpeedKPH) {
+      const next = Math.max(10, Math.ceil(t.maxSpeedKPH * 1.1));
+      if (next !== gaugeMaxKph) { gaugeMaxKph = next; renderGaugeLabels(); }
+    }
     renderInfoStrip();
     if (!simulated) recordBattery();
     if (t.batterySOC !== undefined) updateRange();
@@ -310,6 +338,9 @@
     el('tripDistLabel').textContent = `Trip ${distanceUnitLabel()}`;
     el('tripTopLabel').textContent = `Top ${state.unit}`;
     el('maxSpeedLabel').textContent = `Max ${state.unit}`;
+    el('detailAvgLabel').textContent = `Avg ${state.unit}`;
+    el('detailTopLabel').textContent = `Top ${state.unit}`;
+    renderGaugeLabels();
     renderInfoStrip();
     updateRange();
   }
@@ -325,6 +356,7 @@
 
   function startRide() {
     state.isRiding = true;
+    el('cockpitScreen').classList.add('riding');
     state.rideStart = Date.now();
     state.topSpeedKPH = 0;
     state.speedSamples = [];
@@ -345,6 +377,7 @@
 
   async function finishRide() {
     state.isRiding = false;
+    el('cockpitScreen').classList.remove('riding');
     rideBtn.textContent = 'START RIDE';
     rideBtn.classList.remove('riding');
     clearInterval(state.elapsedTimer);
@@ -567,32 +600,42 @@
   });
 
   // ---------- Sparkline ----------
-  function drawSparkline(canvas, points) {
+  /**
+   * Draws the ride's route shape, coloured by speed, as a small map-less thumbnail.
+   * Positions are projected flat (fine at city scale) and fitted into the box.
+   */
+  function drawRouteThumb(canvas, ride) {
     const ctx = canvas.getContext && canvas.getContext('2d');
     if (!ctx) return; // no 2D context available (e.g. jsdom) — skip silently
-    const w = canvas.width, h = canvas.height;
+    const w = canvas.width, h = canvas.height, pad = w * 0.14;
     ctx.clearRect(0, 0, w, h);
-    if (!points || points.length < 2) {
-      ctx.strokeStyle = '#2b2e33';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, h / 2);
-      ctx.lineTo(w, h / 2);
-      ctx.stroke();
+    const pts = (ride.points || []).filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    if (pts.length < 2) {
+      ctx.fillStyle = '#2b2e33';
+      ctx.beginPath(); ctx.arc(w / 2, h / 2, w * 0.06, 0, Math.PI * 2); ctx.fill();
       return;
     }
-    const speeds = points.map((p) => p.speedMPS || 0);
-    const max = Math.max(...speeds, 0.1);
-    ctx.strokeStyle = '#ffb020';
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    speeds.forEach((s, i) => {
-      const x = (i / (speeds.length - 1)) * w;
-      const y = h - (s / max) * (h - 4) - 2;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+    const k = Math.cos((pts[0].lat * Math.PI) / 180);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      const x = p.lon * k, y = p.lat;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const span = Math.max(maxX - minX, maxY - minY) || 1e-9;
+    const scale = (w - 2 * pad) / span;
+    const ox = (w - (maxX - minX) * scale) / 2, oy = (h - (maxY - minY) * scale) / 2;
+    const proj = ([lat, lon]) => [ox + (lon * k - minX) * scale, h - (oy + (lat - minY) * scale)];
+    ctx.lineWidth = Math.max(2, w / 28);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const seg of NIU.Insights.colouredRoute(pts, state.scooter.maxSpeedKPH || 30)) {
+      ctx.strokeStyle = seg.color;
+      ctx.beginPath();
+      seg.latlngs.forEach((ll, i) => { const [x, y] = proj(ll); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+    const dot = (ll, color) => { const [x, y] = proj(ll); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, w / 16, 0, Math.PI * 2); ctx.fill(); };
+    dot([pts[0].lat, pts[0].lon], '#5ec8d8');
+    dot([pts[pts.length - 1].lat, pts[pts.length - 1].lon], '#ff4438');
   }
 
   // ---------- Rides list ----------
@@ -607,30 +650,46 @@
     el('exportAllBtn').style.display = rides.length ? 'inline-block' : 'none';
     ridesList.innerHTML = '';
     emptyState.style.display = rides.length ? 'none' : 'block';
+    el('ridesSummary').hidden = !rides.length;
+    if (rides.length) {
+      el('ridesTotalCount').textContent = String(rides.length);
+      el('ridesTotalDist').textContent = metersToDisplayDistance(rides.reduce((n, r) => n + (r.distanceMeters || 0), 0)).toFixed(1);
+      el('ridesTotalDistLabel').textContent = `Total ${distanceUnitLabel()}`;
+      el('ridesTotalTime').textContent = formatHours(rides.reduce((n, r) => n + (r.activeRidingSeconds || 0), 0));
+    }
 
     for (const ride of rides) {
       const li = document.createElement('li');
       li.className = 'ride-row';
       const d = new Date(ride.startDate);
+      // Only numbers and locale date strings go into this markup; nothing from the ride's own data.
+      const avg = Number.isFinite(ride.averageSpeedKPH) && ride.averageSpeedKPH > 0 ? ` · ${Math.round(kphToDisplay(ride.averageSpeedKPH))} ${state.unit}` : '';
       li.innerHTML = `
+        <canvas class="route-thumb" width="112" height="112" aria-hidden="true"></canvas>
         <div class="when">
-          <span class="date">${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-          <span class="time">${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>
+          <span class="date">${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+          <span class="time">${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · ${formatHours(ride.activeRidingSeconds || 0)}${avg}</span>
         </div>
-        <canvas class="spark" width="140" height="26"></canvas>
         <div class="metrics">
-          <span class="dist">${metersToDisplayDistance(ride.distanceMeters).toFixed(2)} ${distanceUnitLabel()}</span>
-          <span class="dur">${formatDuration(ride.activeRidingSeconds)}</span>
+          <span class="dist">${metersToDisplayDistance(ride.distanceMeters).toFixed(2)}<small>${distanceUnitLabel()}</small></span>
         </div>
-        <button class="delete-btn" aria-label="Delete ride">Delete</button>
+        <button class="delete-btn" aria-label="Delete ride"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
       `;
-      drawSparkline(li.querySelector('canvas'), ride.points);
+      if (ride.simulated) li.classList.add('simulated');
+      drawRouteThumb(li.querySelector('canvas'), ride);
       li.addEventListener('click', (evt) => {
         if (evt.target.closest('.delete-btn')) return;
         openRideDetail(ride);
       });
-      li.querySelector('.delete-btn').addEventListener('click', async (evt) => {
+      const del = li.querySelector('.delete-btn');
+      del.addEventListener('click', async (evt) => {
         evt.stopPropagation();
+        if (!del.classList.contains('armed')) {        // first tap arms it; a second tap within 4 s deletes
+          del.classList.add('armed');
+          del.setAttribute('aria-label', 'Tap again to delete this ride');
+          setTimeout(() => { del.classList.remove('armed'); del.setAttribute('aria-label', 'Delete ride'); }, 4000);
+          return;
+        }
         await store.deleteRide(ride.id);
         renderRidesList();
       });
@@ -699,6 +758,9 @@
       maxZoom: 19,
     }).addTo(detailMap);
 
+    const hasTrack = !!(ride.points && ride.points.length > 1);
+    el('detailNoTrack').hidden = hasTrack;
+    el('rideDetailMap').style.display = hasTrack ? '' : 'none';
     if (ride.points && ride.points.length > 1) {
       const latlngs = ride.points.map((p) => [p.lat, p.lon]);
       // Colour each stretch of the route by speed (relative to the scooter's own top speed).
@@ -708,8 +770,8 @@
       } else {
         L.polyline(latlngs, { color: '#ffb020', weight: 5 }).addTo(detailMap);
       }
-      L.circleMarker(latlngs[0], { radius: 6, color: '#ffb020', fillOpacity: 1 }).addTo(detailMap);
-      L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#ff4438', fillOpacity: 1 }).addTo(detailMap);
+      L.circleMarker(latlngs[0], { radius: 7, color: '#0a0b0d', weight: 2, fillColor: '#5ec8d8', fillOpacity: 1 }).addTo(detailMap);
+      L.circleMarker(latlngs[latlngs.length - 1], { radius: 7, color: '#0a0b0d', weight: 2, fillColor: '#ff4438', fillOpacity: 1 }).addTo(detailMap);
       detailMap.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
     } else {
       detailMap.setView([33.77, -118.19], 12); // fallback view if no GPS track was captured
@@ -739,8 +801,8 @@
 
   if (!ble.isSupported) {
     dot.className = 'dot unsupported';
-    statusLabel.textContent = 'Web Bluetooth unavailable — use Bluefy on iOS';
-    connectBtn.textContent = 'Bluetooth unsupported in this browser';
+    statusLabel.textContent = 'No Bluetooth here';
+    connectBtn.textContent = 'Open this page in Bluefy to connect';
     connectBtn.disabled = true;
   }
   renderRidesList();

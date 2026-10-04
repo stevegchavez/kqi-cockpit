@@ -19,16 +19,22 @@
 
   <!-- ================= Cockpit ================= -->
   <section id="cockpitScreen" class="screen active">
-    <div class="banner">
-      <span id="statusDot" class="dot disconnected"></span>
-      <span id="statusLabel">Disconnected — tap to connect</span>
-      <span id="faultLabel" class="fault" style="display:none">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-        Fault
-      </span>
-    </div>
+    <header class="cockpit-head">
+      <div class="brand" aria-label="KQi Cockpit"><span class="brand-mark">KQi</span><span class="brand-sub">Cockpit</span></div>
+      <div class="banner">
+        <span id="statusDot" class="dot disconnected"></span>
+        <span id="statusLabel">Not connected</span>
+        <span id="faultLabel" class="fault" style="display:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01M10.3 3.9L2.5 17a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+          Fault
+        </span>
+      </div>
+    </header>
 
-    <button id="connectBtn" class="connect-cta">Connect to scooter</button>
+    <button id="connectBtn" class="connect-cta">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
+      <span class="connect-text">Connect to scooter</span>
+    </button>
 
     <div class="gauge-wrap">
       <svg viewBox="0 0 200 200">
@@ -44,6 +50,7 @@
         </defs>
         <circle class="gauge-disc" cx="100" cy="100" r="76"></circle>
         <circle class="gauge-halo" cx="100" cy="100" r="92"></circle>
+        <g id="gaugeLabels"></g>
         <path id="gaugeTrack" class="gauge-track"></path>
         <path id="gaugeValue" class="gauge-value"></path>
         <g id="gaugeTicks"></g>
@@ -60,25 +67,25 @@
 
     <div class="battery-module">
       <div class="battery-head">
-        <span id="batteryPct" class="pct">0%</span>
         <span class="label">Battery</span>
+        <span id="batteryPct" class="pct numeral">0%</span>
       </div>
       <div id="cellStrip" class="cell-strip"></div>
       <div id="rangeLine" class="range-line"></div>
       <div id="drawLine" class="range-line"></div>
     </div>
 
-    <div class="instrument-strip">
+    <div class="instrument-strip trip-strip">
       <div class="readout"><div id="tripDist" class="v">0.00</div><div id="tripDistLabel" class="t">Trip mi</div></div>
       <div class="readout"><div id="tripTime" class="v">0m 0s</div><div class="t">Elapsed</div></div>
       <div class="readout"><div id="tripTop" class="v">0</div><div id="tripTopLabel" class="t">Top mph</div></div>
     </div>
 
     <div class="instrument-strip info-strip">
-      <div class="readout"><div id="healthVal" class="v">&ndash;</div><div class="t">Battery health</div></div>
+      <div class="readout"><div id="healthVal" class="v">&ndash;</div><div class="t">Health</div></div>
       <div class="readout"><div id="powerVal" class="v off">&ndash;</div><div class="t">Scooter</div></div>
       <div class="readout"><div id="maxSpeedVal" class="v">&ndash;</div><div id="maxSpeedLabel" class="t">Max mph</div></div>
-      <div class="readout"><div id="cyclesVal" class="v">&ndash;</div><div class="t">Charge cycles</div></div>
+      <div class="readout"><div id="cyclesVal" class="v">&ndash;</div><div class="t">Cycles</div></div>
     </div>
 
     <div class="spacer"></div>
@@ -100,6 +107,13 @@
       <button id="planSearch" class="btn primary small" type="button">Search</button>
     </div>
     <div id="planStatus" class="plan-status" role="status"></div>
+    <div id="planEmpty" class="plan-empty">
+      <div class="plan-empty-art" aria-hidden="true">
+        <svg viewBox="0 0 120 80" fill="none"><path class="route" d="M14 64 C 34 64, 30 30, 54 30 S 78 50, 96 18"/><circle cx="14" cy="64" r="6" class="a"/><circle cx="96" cy="18" r="7" class="b"/></svg>
+      </div>
+      <h3>Plan a ride</h3>
+      <p>Search for a place to see the route, how long it takes and whether your battery will get you there and back.</p>
+    </div>
     <ul id="planResults" class="plan-results"></ul>
     <div id="planSummary" class="plan-summary" hidden></div>
     <div id="planMap" class="plan-map" hidden></div>
@@ -108,13 +122,23 @@
       <button id="planClear" class="btn" type="button" hidden>Clear</button>
     </div>
     <ol id="planSteps" class="plan-steps"></ol>
-    <p class="hint small">Searching and routing use OpenStreetMap services (Nominatim and routing.openstreetmap.de). They are sent what you type, your start and end points, and, to favour nearby results, a rough 100 km box around where you are. Nothing is sent until you tap. Routes are for bicycles, which keeps you off motorways but can include paths where scooters are not allowed, so follow local rules and signs. Directions are text only and need the screen on: keep it in a mount and only glance when it is safe.</p>
+    <details class="plan-about">
+      <summary>Privacy and safety</summary>
+      <p class="hint small">Searching and routing use OpenStreetMap services (Nominatim and routing.openstreetmap.de). They are sent what you type, your start and end points, and, to favour nearby results, a rough 100 km box around where you are. Nothing is sent until you tap. Routes are for bicycles, which keeps you off motorways but can include paths where scooters are not allowed, so follow local rules and signs. Directions are text only and need the screen on: keep it in a mount and only glance when it is safe.</p>
+    </details>
   </section>
 
   <!-- ================= Rides ================= -->
   <section id="ridesScreen" class="screen">
-    <div class="screen-title">Rides</div>
-    <button id="exportAllBtn" class="btn small" style="display:none">Export all rides (CSV)</button>
+    <div class="title-row">
+      <div class="screen-title">Rides</div>
+      <button id="exportAllBtn" class="btn small ghost" style="display:none">Export all</button>
+    </div>
+    <div id="ridesSummary" class="instrument-strip rides-summary" hidden>
+      <div class="readout"><div id="ridesTotalCount" class="v">0</div><div class="t">Rides</div></div>
+      <div class="readout"><div id="ridesTotalDist" class="v">0</div><div id="ridesTotalDistLabel" class="t">Total mi</div></div>
+      <div class="readout"><div id="ridesTotalTime" class="v">0</div><div class="t">Ride time</div></div>
+    </div>
     <ul id="ridesList" class="rides-list"></ul>
     <div id="emptyState" class="empty-state" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
@@ -156,7 +180,8 @@
   <section id="setupScreen" class="screen">
     <div class="screen-title">Setup</div>
     <div class="setup-card">
-      <h3>Scooter keys</h3>
+      <section class="card">
+      <div class="card-head"><h3>Scooter keys</h3></div>
       <p>This app talks to your scooter with two secrets NIU assigns to it: its Bluetooth password and AES key. They are stored only in this browser, on this device.</p>
       <p class="hint">Get them once with the open-source <em>niu-kqi</em> tool, which logs in to NIU on your computer and saves them to <code>secrets/scooter.json</code>. Paste that file's contents below, or paste the password and the AES key on two lines.</p>
       <textarea id="keysInput" rows="6" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Paste scooter.json, or the password and AES key on two lines"></textarea>
@@ -165,10 +190,16 @@
         <button id="clearKeysBtn" class="btn">Remove keys</button>
       </div>
       <div id="keysStatus" class="keys-status" role="status">No keys saved</div>
-      <h3 class="diag-entry-title">Diagnostics (advanced)</h3>
+      </section>
+      <section class="card">
+      <div class="card-head"><h3>Diagnostics</h3><span class="chip muted">Advanced</span></div>
       <p class="hint">Find out which values your scooter reports, compare them before and after you do something, and export a report to share. Read-only.</p>
-      <button id="openDiagBtn" class="btn">Open Diagnostics</button>
-      <p class="hint small">Read-only: this app only reads status from your scooter and never sends commands. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
+      <button id="openDiagBtn" class="btn wide">Open Diagnostics</button>
+      </section>
+      <section class="card quiet">
+      <div class="card-head"><h3>Privacy</h3><span class="chip ok">Read-only</span></div>
+      <p class="hint small">This app only reads status from your scooter and never sends commands. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
+      </section>
     </div>
   </section>
 
@@ -199,6 +230,10 @@
   <!-- ================= Ride detail overlay ================= -->
   <div id="rideDetail">
     <div id="rideDetailMap"></div>
+    <div id="detailNoTrack" class="no-track" hidden>
+      <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><path d="M4 4l16 16"/></svg>
+      <div>No GPS track was recorded for this ride.</div>
+    </div>
     <div class="detail-header">
       <button id="closeDetailBtn" class="back-btn">‹</button>
       <span id="detailDate" class="detail-date-chip"></span>
@@ -214,8 +249,8 @@
     </div>
     <div class="detail-summary instrument-strip">
       <div class="readout"><div id="detailDist" class="v">0</div><div class="t">Distance</div></div>
-      <div class="readout"><div id="detailAvg" class="v">0</div><div class="t">Avg</div></div>
-      <div class="readout"><div id="detailTop" class="v">0</div><div class="t">Top</div></div>
+      <div class="readout"><div id="detailAvg" class="v">0</div><div id="detailAvgLabel" class="t">Avg mph</div></div>
+      <div class="readout"><div id="detailTop" class="v">0</div><div id="detailTopLabel" class="t">Top mph</div></div>
       <div class="readout"><div id="detailTime" class="v">0</div><div class="t">Time</div></div>
     </div>
   </div>
