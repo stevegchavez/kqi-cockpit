@@ -96,6 +96,17 @@
     const d = describeArc(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_ANGLE, GAUGE_END_ANGLE);
     gaugeTrack.setAttribute('d', d);
     gaugeValue.setAttribute('d', d);
+    // Thin dark cuts across track and value turn the arc into segments.
+    const cut = el('gaugeCut');
+    if (cut) cut.setAttribute('d', d);
+    // A thin outer band marking the high-drain end of the dial.
+    const red = el('gaugeRedzone');
+    if (red) {
+      const a0 = GAUGE_START_ANGLE + (GAUGE_END_ANGLE - GAUGE_START_ANGLE) * EFF_POOR_PCT;
+      const s = polarToCartesian(GAUGE_CX, GAUGE_CY, GAUGE_R + 9, a0);
+      const e = polarToCartesian(GAUGE_CX, GAUGE_CY, GAUGE_R + 9, GAUGE_END_ANGLE);
+      red.setAttribute('d', ['M', s.x, s.y, 'A', GAUGE_R + 9, GAUGE_R + 9, 0, 0, 1, e.x, e.y].join(' '));
+    }
     // Colour ramp along the arc, with each stop at the horizontal position of its speed zone
     // (the gradient is horizontal, x 34..186, so the stops are converted from arc angle to x).
     const xAt = (pct) => GAUGE_CX + GAUGE_R * Math.sin(((GAUGE_START_ANGLE + (GAUGE_END_ANGLE - GAUGE_START_ANGLE) * pct) * Math.PI) / 180);

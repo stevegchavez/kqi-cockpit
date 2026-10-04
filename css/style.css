@@ -799,3 +799,136 @@ body {
     var(--ink);
 }
 .no-track[hidden] { display: none; }
+
+/* ============================================================
+   EDGE THEME — angular, HUD-style. Cut corners instead of
+   rounded ones, a segmented dial, slanted type and cells,
+   hazard striping. Presentation only.
+   ============================================================ */
+:root {
+  --cut: 12px;
+  --cut-sm: 7px;
+  --chamfer: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  --chamfer-sm: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
+  --chamfer-r: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+
+/* Background: diagonal hairlines + faint scanlines instead of the carbon weave */
+#app::before {
+  opacity: 1;
+  background-image:
+    repeating-linear-gradient(-45deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 10px),
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px);
+  background-size: auto; background-position: 0 0;
+}
+body {
+  background:
+    radial-gradient(110% 55% at 50% -12%, rgba(255,150,30,0.18), transparent 60%),
+    linear-gradient(115deg, transparent 62%, rgba(255,68,56,0.06) 62%, rgba(255,68,56,0.06) 63%, transparent 63%),
+    linear-gradient(115deg, transparent 66%, rgba(255,176,32,0.05) 66%, rgba(255,176,32,0.05) 66.6%, transparent 66.6%),
+    var(--ink);
+  background-attachment: fixed;
+}
+
+/* ---------- Cut corners everywhere ---------- */
+.instrument-strip, .battery-module, .card, .ride-row, .chart-box, .plan-summary, .plan-map,
+.plan-banner, .setup-card textarea, .diag-preview, .diag-note, .plan-about, #toast {
+  border-radius: 0 !important; clip-path: var(--chamfer);
+}
+.btn, .connect-cta, .ride-btn, .plan-result, .plan-form input, .diag-filters input[type="search"] {
+  border-radius: 0 !important; clip-path: var(--chamfer-sm);
+}
+.banner, .chip, .keys-status, .unit-toggle, .detail-date-chip, .route-thumb, .plan-verdict {
+  border-radius: 0 !important; clip-path: var(--chamfer-sm);
+}
+.back-btn { border-radius: 0 !important; clip-path: polygon(30% 0, 100% 0, 100% 100%, 30% 100%, 0 50%); }
+.ride-row .delete-btn { border-radius: 0; clip-path: var(--chamfer-sm); }
+/* clip-path hides outer glows, so give cards a lit top edge instead */
+.instrument-strip, .battery-module, .card, .ride-row, .plan-summary {
+  border-top-color: rgba(255,176,32,0.28) !important;
+  background:
+    linear-gradient(90deg, rgba(255,176,32,0.9), rgba(255,176,32,0) 38%) top left / 100% 2px no-repeat,
+    linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.012));
+}
+.card.quiet { background: transparent; }
+
+/* ---------- Type: condensed, slanted, uppercase headings ---------- */
+.screen-title, .diag-title, .plan-empty h3, .card-head h3, .empty-state h3 {
+  text-transform: uppercase; letter-spacing: 1.5px; font-style: italic;
+}
+.screen-title { font-size: 34px; font-weight: 800; }
+.screen-title::before, .diag-entry-title::before {
+  width: 9px; height: 70%; border-radius: 0; transform: translateY(-50%) skewX(-20deg);
+  background: repeating-linear-gradient(180deg, var(--ember) 0 3px, transparent 3px 5px);
+}
+.instrument-strip .v, .battery-head .pct, .plan-big, .plan-banner-dist, .ride-row .metrics .dist, .gauge-readout .value {
+  display: inline-block; transform: skewX(-8deg); font-style: normal;
+}
+.instrument-strip .t, .battery-head .label, .chart-title, .brand-sub { font-weight: 700; }
+.chart-title::before { content: "▸ "; color: var(--ember); }
+.brand-mark { font-style: italic; letter-spacing: 1px; transform: skewX(-6deg); display: inline-block; }
+
+/* ---------- Gauge: segmented arc, corner brackets, red zone ---------- */
+.gauge-cut { fill: none; stroke: #0a0b0d; stroke-width: 16; stroke-dasharray: 1.6 5.4; pointer-events: none; }
+.gauge-redzone { fill: none; stroke: var(--redline); stroke-width: 2.5; opacity: .85; filter: drop-shadow(0 0 4px rgba(255,68,56,0.8)); }
+.gauge-track { stroke: #1c1f24; stroke-linecap: butt; }
+.gauge-value { stroke-linecap: butt; }
+.gauge-tick { stroke: #3a3e45; stroke-width: 1.5; }
+.gauge-tick.major { stroke: var(--paper); stroke-width: 2.5; }
+.gauge-halo { stroke: rgba(94,200,216,0.22); stroke-dasharray: 14 6 2 6; stroke-width: 1.2; }
+.gauge-disc { stroke: rgba(255,176,32,0.12); stroke-width: 1.5; }
+.gauge-num { fill: #aab0b8; font-weight: 700; font-style: italic; }
+.gauge-wrap::before {
+  content: ""; position: absolute; inset: -4%; pointer-events: none;
+  background:
+    linear-gradient(var(--ember), var(--ember)) top left / 18px 2px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) top left / 2px 18px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) top right / 18px 2px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) top right / 2px 18px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) bottom left / 18px 2px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) bottom left / 2px 18px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) bottom right / 18px 2px no-repeat,
+    linear-gradient(var(--ember), var(--ember)) bottom right / 2px 18px no-repeat;
+  opacity: .55;
+}
+.eff { font-style: italic; }
+
+/* ---------- Battery cells as slanted blades ---------- */
+.cell { border-radius: 0; transform: skewX(-20deg); }
+.cell-strip { gap: 5px; padding: 0 4px; }
+
+/* ---------- Ride button: hazard ends, angular, pulsing stripes while riding ---------- */
+.ride-btn {
+  font-style: italic; letter-spacing: 4px; font-weight: 800;
+  background:
+    repeating-linear-gradient(-45deg, rgba(0,0,0,0.85) 0 7px, transparent 7px 14px) left / 30px 100% no-repeat,
+    repeating-linear-gradient(-45deg, rgba(0,0,0,0.85) 0 7px, transparent 7px 14px) right / 30px 100% no-repeat,
+    linear-gradient(135deg, #ffc548, #ff8f1f);
+}
+.ride-btn.riding {
+  background:
+    repeating-linear-gradient(-45deg, rgba(0,0,0,0.22) 0 12px, transparent 12px 24px),
+    linear-gradient(135deg, #ff6a5e, #e0281d);
+  background-size: 34px 34px, 100% 100%;
+  animation: hazard 0.9s linear infinite, beat 1.6s ease-in-out infinite;
+}
+@keyframes hazard { to { background-position: 34px 0, 0 0; } }
+.btn.primary { font-style: italic; text-transform: uppercase; letter-spacing: 1px; }
+
+/* ---------- Header pill, connect ---------- */
+.connect-cta { text-transform: uppercase; letter-spacing: 1.5px; font-size: 12.5px; }
+
+/* ---------- Tab bar: parallelogram indicator ---------- */
+.tabbar { border-top: 1px solid rgba(255,176,32,0.2); }
+.tab-btn { text-transform: uppercase; letter-spacing: 1px; font-size: 9.5px; }
+.tab-btn.active::before {
+  top: -9px; left: 26%; right: 26%; height: 4px; border-radius: 0; transform: skewX(-30deg);
+  background: repeating-linear-gradient(90deg, var(--ember) 0 6px, transparent 6px 8px);
+}
+
+/* ---------- Lists ---------- */
+.plan-step.current { border-radius: 0; box-shadow: inset 3px 0 0 var(--ember); }
+.charges-list li, .insights li { border-bottom-style: dashed; }
+.gauge-wrap::before { inset: 3% -2%; }
+.gauge-wrap { margin-top: 12px; margin-bottom: 4px; }
+.screen-title, .diag-entry-title { padding-left: 22px; }
