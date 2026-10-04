@@ -35,7 +35,7 @@
       to: $('planTo'), search: $('planSearch'), results: $('planResults'), status: $('planStatus'),
       summary: $('planSummary'), steps: $('planSteps'), follow: $('planFollow'), banner: $('planBanner'),
       bannerText: $('planBannerText'), bannerDist: $('planBannerDist'), bannerSub: $('planBannerSub'),
-      reroute: $('planReroute'), mapBox: $('planMap'), clear: $('planClear'),
+      reroute: $('planReroute'), mapBox: $('planMap'), clear: $('planClear'), empty: $('planEmpty'),
     };
     if (!els.to || !els.search) return { onShow() {}, state: {} };
 
@@ -155,6 +155,7 @@
       });
       els.follow.hidden = false;
       els.clear.hidden = false;
+      if (els.empty) els.empty.hidden = true;
       drawMap();
     }
 
@@ -263,6 +264,7 @@
       els.to.value = '';
       clear(els.steps); clear(els.results); clear(els.summary);
       els.summary.hidden = true; els.follow.hidden = true; els.clear.hidden = true;
+      if (els.empty) els.empty.hidden = false;
       if (els.mapBox) els.mapBox.hidden = true;
       say('');
     });
