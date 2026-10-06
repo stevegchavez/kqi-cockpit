@@ -42,6 +42,23 @@ is blank only because the sandbox had no network for map tiles):
   other services, and only when you tap. Place search (Nominatim) and routing
   (routing.openstreetmap.de) are sent what you type, your start and end points, and, to favour
   nearby results, a rough 100 km box around you. No keys, no account, nothing from your rides.
+- **Spoken directions:** while following a route, turns are read out ("In 300 feet, turn left
+  onto Oak Avenue") with the phone's built-in speech. Nothing is sent anywhere; switch it off
+  with the Voice button.
+- **Saved places:** save a destination as Home, Work or a favourite; tap its chip to plan it again.
+  The route summary also shows the round trip (distance, time and the battery left when you're back).
+- **Find my scooter:** the end of each recorded ride is remembered as the parking spot (or tap
+  *Park here*); *Walk back* plans a walking route to it.
+- **Range circle:** draws how far you can go and still get back with 10% left, from your current
+  battery and your own rides (straight-line, so roads make it a little smaller).
+- **Odometer, records and maintenance (Rides tab):** total miles from recorded rides (the scooter
+  doesn't report its own odometer over Bluetooth; *Match scooter* lines it up with the display
+  once), this week's miles, day streak, personal bests, and suggested maintenance checks
+  (tyre pressure, lights, folding latch, brakes, tyre wear) with a reminder dot when one is due.
+- **Works offline where the browser allows it:** a service worker keeps the app files and the map
+  tiles you've already viewed. App files are always fetched fresh when online, so updates still
+  arrive at once. Place search and routing are never cached. Some in-app browsers (possibly
+  Bluefy) don't run service workers; then the app just needs a connection to load.
 - **Battery current and lifetime energy** are read from the scooter and shown as raw numbers on the Cockpit
   (units not yet confirmed); ride CSVs gain a `battery_current_raw` column so the scale can be worked out.
 - **Never writes.** There are no lock, headlight, mode or setting controls, and the protocol
@@ -52,7 +69,7 @@ is blank only because the sandbox had no network for map tiles):
 
 ## Status: what is verified, and what isn't
 
-**Verified by the automated tests (`npm test`, 274 tests, no scooter needed):**
+**Verified by the automated tests (`npm test`, 304 tests, no scooter needed):**
 
 | Area | How it is checked |
 | --- | --- |
@@ -88,6 +105,10 @@ re-anchors after a permanent step without counting it as distance, and ride stat
 phone's own speed reading (29.7 km/h top speed on that ride) rather than differencing positions.
 `test/fixtures/real-ride-relocated.json` is that ride moved to an unrelated place.
 
+**Spoken directions, saved places, find-my-scooter, range, odometer/maintenance and offline
+support** are tested in code (fake speech, fake GPS, fake cache) and by screenshots, not yet on
+a phone. Whether Bluefy speaks aloud and runs the service worker is unverified.
+
 **Trip planning is tested only against canned replies** shaped like the Nominatim and OSRM
 answers (the sandbox this was built in cannot reach those services). Whether the live services
 answer in exactly that shape, how good the routes are for a scooter, and following on a real
@@ -107,7 +128,7 @@ npm install
 npm test
 ```
 
-Thirteen suites: `crypto`, `fields`, `protocol`, `session`, `ble`, `keystore`, `insights`, `exporters`, `battery`, `diagnostics`, `geo`, `planner`, `dom-wiring`.
+Fifteen suites: `crypto`, `fields`, `protocol`, `session`, `ble`, `keystore`, `insights`, `exporters`, `battery`, `diagnostics`, `geo`, `planner`, `garage`, `sw`, `dom-wiring`.
 
 ## Getting your scooter keys (one time)
 
@@ -177,7 +198,7 @@ Tap **Simulate telemetry** on the Cockpit screen — it feeds fake data through 
 ## Privacy
 
 - No accounts, analytics or crash reporters; no NIU cloud calls from this app.
-- Ride history and battery history are in IndexedDB and the scooter keys are in localStorage — on-device only.
+- Ride history and battery history are in IndexedDB; the scooter keys, saved places, parking spot, odometer offset and maintenance log are in localStorage — all on-device only.
 - Exports are generated on the device. Where they go next (Files, Messages, email…) is up to you in the share sheet.
 - **No third-party scripts.** Leaflet is vendored (`vendor/leaflet/`, pinned and hash-recorded)
   specifically so no other host's JavaScript can run in the same origin as the stored keys.
@@ -211,16 +232,18 @@ js/
   keystore.js         Parse/validate/store the scooter keys (localStorage)
   storage.js          IndexedDB ride history
   battery.js          Battery-history store, record rules, charge inference, health trend
+  garage.js           Odometer from rides, maintenance checks and log (localStorage)
   insights.js         Ride stats, range estimate, speed-coloured route (pure)
   exporters.js        GPX / CSV generation and share / download / clipboard delivery
   charts.js           Tiny dependency-free SVG line charts
   fields.js           Catalogue of all 299 known fields (GENERATED by tools/gen_fields.py)
   diagnostics.js      Read-only scan / snapshot diff / watch / redacted report, and the safety policy
   diag-ui.js          The Diagnostics screen (renders scooter values with textContent only)
-  planner.js          Place search, routing, directions, trip time/battery estimate, route following (pure)
+  planner.js          Place search, routing (bike/foot), directions, voice cues, range radius, route following (pure)
   plan-ui.js          The Plan screen (renders network text with textContent only)
   geo.js              Foreground GPS trip recording (haversine distance, GPS spike/step filter)
   app.js              Wires everything to the DOM
+sw.js                 Service worker: offline app files and viewed map tiles
 vendor/leaflet/       Vendored Leaflet 1.9.4 (BSD-2)
 tools/                gen_fields.py (regenerates js/fields.js from the source field table)
 test/                 One *.test.js per suite, fixtures/ and helpers/

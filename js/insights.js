@@ -182,8 +182,60 @@
     return out;
   }
 
+  // ------------------------------------------------------------------ records and streaks
+
+  /** Local calendar day number (days since epoch in the phone's own time zone). */
+  function dayIndex(t) {
+    const d = new Date(t);
+    return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  }
+
+  /**
+   * Personal bests, riding streak and weekly distance from real (non-demo) rides.
+   * Streak: consecutive days with at least one ride, counting back from today, or from
+   * yesterday if there has been no ride yet today (so a streak doesn't "break" at breakfast).
+   * Weeks start on Monday, local time. `weeks` most recent, oldest first.
+   */
+  function records(rides, opts) {
+    const o = Object.assign({ now: Date.now(), weeks: 8 }, opts);
+    const real = (rides || []).filter((r) => r && !r.simulated && isNum(r.startDate));
+    const best = (key) => real.reduce((b, r) => (isNum(r[key]) && (!b || r[key] > b[key]) ? r : b), null);
+    const days = new Set(real.map((r) => dayIndex(r.startDate)));
+    const today = dayIndex(o.now);
+    let d = days.has(today) ? today : today - 1;
+    let streak = 0;
+    while (days.has(d)) { streak++; d--; }
+    // longest streak ever
+    const sorted = [...days].sort((a, b) => a - b);
+    let longestStreak = 0, run = 0;
+    for (let k = 0; k < sorted.length; k++) {
+      run = k && sorted[k] === sorted[k - 1] + 1 ? run + 1 : 1;
+      longestStreak = Math.max(longestStreak, run);
+    }
+    const mondayOf = (t) => { const di = dayIndex(t); const dow = (new Date(t).getDay() + 6) % 7; return di - dow; };
+    const thisMonday = mondayOf(o.now);
+    const weekly = [];
+    for (let w = o.weeks - 1; w >= 0; w--) weekly.push({ start: thisMonday - 7 * w, meters: 0, rides: 0 });
+    for (const r of real) {
+      const wk = weekly.find((x) => x.start === mondayOf(r.startDate));
+      if (wk) { wk.meters += r.distanceMeters || 0; wk.rides++; }
+    }
+    return {
+      rides: real.length,
+      totalMeters: real.reduce((n, r) => n + (r.distanceMeters || 0), 0),
+      longestRide: best('distanceMeters'),
+      longestTime: best('activeRidingSeconds'),
+      fastestRide: best('topSpeedKPH'),
+      streak, longestStreak,
+      ridingDays: days.size,
+      weekly,
+      thisWeekMeters: weekly[weekly.length - 1].meters,
+    };
+  }
+
   return {
     METERS_PER_MILE, SPEED_RAMP,
     distanceMeters, segments, elevationChange, rideStats, rangeEstimate, speedColor, colouredRoute,
+    records, dayIndex,
   };
 });

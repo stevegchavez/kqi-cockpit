@@ -415,6 +415,9 @@
     };
 
     await store.saveRide(ride);
+    // Find my scooter: where a real ride ended is where the scooter is parked.
+    const last = points.length ? points[points.length - 1] : null;
+    if (last && !ride.simulated && planUI) planUI.park({ lat: last.lat, lon: last.lon, t: endDate }, 'ride');
     tripDist.textContent = '0.00';
     tripTime.textContent = '0m 0s';
     tripTop.textContent = '0';
@@ -649,6 +652,119 @@
     dot([pts[pts.length - 1].lat, pts[pts.length - 1].lon], '#ff4438');
   }
 
+  // ---------- Garage: odometer, records, maintenance (Rides tab) ----------
+  const MI = 1609.344;
+  const milesToDisplay = (mi) => (state.unit === 'mph' ? mi : mi * 1.609344);
+  const displayToMiles = (v) => (state.unit === 'mph' ? v : v / 1.609344);
+  const loadGarage = () => NIU.Garage.load(localStorage);
+
+  function renderGarage() {
+    const rides = state.rides || [];
+    const g = loadGarage();
+    const odo = NIU.Garage.odometer(rides, g);
+    const u = distanceUnitLabel();
+    el('odoValue').textContent = milesToDisplay(odo).toFixed(1);
+    el('odoUnit').textContent = u;
+
+    const rec = NIU.Insights.records(rides);
+    el('weekDist').textContent = metersToDisplayDistance(rec.thisWeekMeters).toFixed(1);
+    el('weekDistLabel').textContent = `This week ${u}`;
+    el('streakVal').textContent = String(rec.streak);
+    el('ridesTotalCount').textContent = String(rec.rides);
+
+    // 8 weeks of distance as bars; the current week is highlighted.
+    const bars = el('weekBars');
+    bars.innerHTML = '';
+    const maxW = Math.max(...rec.weekly.map((w) => w.meters), 1);
+    rec.weekly.forEach((w, i) => {
+      const b = document.createElement('div');
+      b.className = 'week-bar' + (i === rec.weekly.length - 1 ? ' current' : '');
+      b.style.height = `${Math.max(4, Math.round((w.meters / maxW) * 100))}%`;
+      b.title = `${metersToDisplayDistance(w.meters).toFixed(1)} ${u}`;
+      bars.appendChild(b);
+    });
+
+    const list = el('recordsList');
+    list.innerHTML = '';
+    const dayStr = (r) => new Date(r.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const rows = [];
+    if (rec.longestRide) rows.push(['Longest ride', `${metersToDisplayDistance(rec.longestRide.distanceMeters).toFixed(2)} ${u}`, dayStr(rec.longestRide)]);
+    if (rec.longestTime) rows.push(['Longest time', formatDuration(rec.longestTime.activeRidingSeconds || 0), dayStr(rec.longestTime)]);
+    if (rec.fastestRide && rec.fastestRide.topSpeedKPH > 0) rows.push(['Top speed', `${Math.round(kphToDisplay(rec.fastestRide.topSpeedKPH))} ${state.unit}`, dayStr(rec.fastestRide)]);
+    if (rec.longestStreak) rows.push(['Best streak', `${rec.longestStreak} day${rec.longestStreak === 1 ? '' : 's'}`, `${rec.ridingDays} riding days`]);
+    for (const [k, v, when] of rows) {
+      const li = document.createElement('li');
+      for (const [cls, text] of [['k', k], ['v', v], ['w', when]]) {
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = text;
+        li.appendChild(span);
+      }
+      list.appendChild(li);
+    }
+    list.hidden = !rows.length;
+
+    renderMaintenance(g, odo);
+  }
+
+  function renderMaintenance(g, odo) {
+    const items = NIU.Garage.status(g, odo);
+    const list = el('maintList');
+    list.innerHTML = '';
+    const u = distanceUnitLabel();
+    const dist = (mi) => `${Math.round(milesToDisplay(Math.abs(mi)))} ${u}`;
+    let due = 0;
+    for (const s of items) {
+      if (s.due) due++;
+      const li = document.createElement('li');
+      li.className = 'maint-item' + (s.due ? ' due' : s.soon ? ' soon' : '');
+      const info = document.createElement('div');
+      info.className = 'maint-info';
+      const name = document.createElement('div');
+      name.className = 'maint-name';
+      name.textContent = s.item.name;
+      const sub = document.createElement('div');
+      sub.className = 'maint-sub';
+      const last = s.lastDone ? `last done ${new Date(s.lastDone.t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'not logged yet';
+      sub.textContent = `${s.due ? (s.dueInMiles < -0.5 ? `Due · ${dist(s.dueInMiles)} over` : 'Due now') : `In ${dist(s.dueInMiles)}`} · every ${dist(s.item.everyMiles)} · ${last}`;
+      info.appendChild(name); info.appendChild(sub);
+      const btn = document.createElement('button');
+      btn.className = 'btn small ' + (s.due ? 'primary' : 'ghost');
+      btn.type = 'button';
+      btn.textContent = 'Done';
+      btn.addEventListener('click', () => {
+        NIU.Garage.save(localStorage, NIU.Garage.markDone(loadGarage(), s.item.id, NIU.Garage.odometer(state.rides || [], loadGarage())));
+        showToast(`Logged: ${s.item.name.toLowerCase()}`);
+        renderGarage();
+      });
+      li.appendChild(info); li.appendChild(btn);
+      list.appendChild(li);
+    }
+    const badge = el('maintBadge');
+    badge.hidden = !due;
+    badge.textContent = `${due} due`;
+    badge.className = 'chip warn';
+    el('ridesTabBtn').classList.toggle('has-badge', due > 0);
+  }
+
+  el('odoSetBtn').addEventListener('click', () => {
+    const f = el('odoForm');
+    f.hidden = !f.hidden;
+    if (!f.hidden) { el('odoInput').value = ''; el('odoInput').focus(); }
+  });
+  el('odoForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = parseFloat(el('odoInput').value);
+    try {
+      NIU.Garage.save(localStorage, NIU.Garage.setOdometer(state.rides || [], loadGarage(), displayToMiles(v)));
+      el('odoForm').hidden = true;
+      showToast('Odometer matched to the scooter');
+      renderGarage();
+    } catch (err) {
+      showToast(state.unit === 'mph' ? err.message : err.message.replace('miles', 'kilometres'));
+    }
+  });
+
   // ---------- Rides list ----------
   el('exportAllBtn').addEventListener('click', () => {
     exportFile('niu-rides', 'csv', 'text/csv', NIU.Exporters.ridesSummaryCSV(state.rides), Date.now());
@@ -661,13 +777,7 @@
     el('exportAllBtn').style.display = rides.length ? 'inline-block' : 'none';
     ridesList.innerHTML = '';
     emptyState.style.display = rides.length ? 'none' : 'block';
-    el('ridesSummary').hidden = !rides.length;
-    if (rides.length) {
-      el('ridesTotalCount').textContent = String(rides.length);
-      el('ridesTotalDist').textContent = metersToDisplayDistance(rides.reduce((n, r) => n + (r.distanceMeters || 0), 0)).toFixed(1);
-      el('ridesTotalDistLabel').textContent = `Total ${distanceUnitLabel()}`;
-      el('ridesTotalTime').textContent = formatHours(rides.reduce((n, r) => n + (r.activeRidingSeconds || 0), 0));
-    }
+    renderGarage();
 
     for (const ride of rides) {
       const li = document.createElement('li');
@@ -817,4 +927,9 @@
     connectBtn.disabled = true;
   }
   renderRidesList();
+
+  // ---------- Offline support (best effort; some in-app browsers don't run service workers) ----------
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* app works the same without it */ });
+  }
 })();
