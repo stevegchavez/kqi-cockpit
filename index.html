@@ -108,6 +108,8 @@
       <input id="planTo" type="search" placeholder="Where to? (place or address)" autocomplete="off" autocapitalize="words" enterkeyhint="search" aria-label="Destination" />
       <button id="planSearch" class="btn primary small" type="button">Search</button>
     </div>
+    <div id="planQuick" class="plan-quick" aria-label="Saved places and shortcuts"></div>
+    <div id="planParked" class="plan-parked" hidden></div>
     <div id="planStatus" class="plan-status" role="status"></div>
     <div id="planEmpty" class="plan-empty">
       <div class="plan-empty-art" aria-hidden="true">
@@ -118,15 +120,17 @@
     </div>
     <ul id="planResults" class="plan-results"></ul>
     <div id="planSummary" class="plan-summary" hidden></div>
+    <div id="planSave" class="plan-save" hidden></div>
     <div id="planMap" class="plan-map" hidden></div>
     <div class="plan-actions">
       <button id="planFollow" class="btn primary" type="button" hidden>Start following</button>
+      <button id="planVoice" class="btn voice" type="button" aria-pressed="true">Voice: on</button>
       <button id="planClear" class="btn" type="button" hidden>Clear</button>
     </div>
     <ol id="planSteps" class="plan-steps"></ol>
     <details class="plan-about">
       <summary>Privacy and safety</summary>
-      <p class="hint small">Searching and routing use OpenStreetMap services (Nominatim and routing.openstreetmap.de). They are sent what you type, your start and end points, and, to favour nearby results, a rough 100 km box around where you are. Nothing is sent until you tap. Routes are for bicycles, which keeps you off motorways but can include paths where scooters are not allowed, so follow local rules and signs. Directions are text only and need the screen on: keep it in a mount and only glance when it is safe.</p>
+      <p class="hint small">Searching and routing use OpenStreetMap services (Nominatim and routing.openstreetmap.de). They are sent what you type, your start and end points, and, to favour nearby results, a rough 100 km box around where you are. Nothing is sent until you tap. Routes are for bicycles, which keeps you off motorways but can include paths where scooters are not allowed, so follow local rules and signs. Directions are spoken when Voice is on (using the phone's built-in speech, nothing is sent anywhere) and need the screen on: keep the phone in a mount and only glance when it is safe. Saved places and your parking spot are stored only in this browser.</p>
     </details>
   </section>
 
@@ -136,11 +140,38 @@
       <div class="screen-title">Rides</div>
       <button id="exportAllBtn" class="btn small ghost" style="display:none">Export all</button>
     </div>
-    <div id="ridesSummary" class="instrument-strip rides-summary" hidden>
-      <div class="readout"><div id="ridesTotalCount" class="v">0</div><div class="t">Rides</div></div>
-      <div class="readout"><div id="ridesTotalDist" class="v">0</div><div id="ridesTotalDistLabel" class="t">Total mi</div></div>
-      <div class="readout"><div id="ridesTotalTime" class="v">0</div><div class="t">Ride time</div></div>
-    </div>
+    <section id="garageCard" class="card garage">
+      <div class="odo-row">
+        <div>
+          <div class="odo-label">Odometer</div>
+          <div class="odo-value"><span id="odoValue" class="numeral">0.0</span><small id="odoUnit">mi</small></div>
+        </div>
+        <button id="odoSetBtn" class="btn small ghost" type="button">Match scooter</button>
+      </div>
+      <form id="odoForm" class="odo-form" hidden>
+        <label for="odoInput">Reading on the scooter's display</label>
+        <div class="odo-form-row">
+          <input id="odoInput" type="number" inputmode="decimal" min="0" step="0.1" placeholder="e.g. 412.5" />
+          <button class="btn small primary" type="submit">Save</button>
+        </div>
+      </form>
+      <div class="instrument-strip rides-summary">
+        <div class="readout"><div id="weekDist" class="v">0</div><div id="weekDistLabel" class="t">This week mi</div></div>
+        <div class="readout"><div id="streakVal" class="v">0</div><div class="t">Day streak</div></div>
+        <div class="readout"><div id="ridesTotalCount" class="v">0</div><div class="t">Rides</div></div>
+      </div>
+      <div id="weekBars" class="week-bars" aria-label="Distance per week, last 8 weeks"></div>
+      <ul id="recordsList" class="records"></ul>
+      <p class="hint small">The scooter doesn't report its own odometer over Bluetooth, so this adds up rides recorded here. Tap "Match scooter" once to line it up with the scooter's display.</p>
+    </section>
+
+    <section id="maintCard" class="card maint">
+      <div class="card-head"><h3>Maintenance</h3><span id="maintBadge" class="chip" hidden></span></div>
+      <ul id="maintList" class="maint-list"></ul>
+      <p class="hint small">Suggested intervals, not NIU's official schedule; follow the manual where it differs. Tap Done after each check.</p>
+    </section>
+
+    <h4 id="ridesListTitle" class="chart-title">Recent rides</h4>
     <ul id="ridesList" class="rides-list"></ul>
     <div id="emptyState" class="empty-state" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
@@ -215,7 +246,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>
       Plan
     </button>
-    <button class="tab-btn" data-target="ridesScreen">
+    <button class="tab-btn" data-target="ridesScreen" id="ridesTabBtn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
       Rides
     </button>
@@ -316,6 +347,7 @@
 <script src="js/exporters.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/battery.js"></script>
+<script src="js/garage.js"></script>
 <script src="js/fields.js"></script>
 <script src="js/diagnostics.js"></script>
 <script src="js/diag-ui.js"></script>

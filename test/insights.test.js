@@ -222,4 +222,44 @@ test('real ride (relocated): top speed matches the phone reading, not the GPS ju
   assert.ok(s.avgMovingKph > 21 && s.avgMovingKph < 24.5, `average ${s.avgMovingKph}`);
 });
 
+// ---- records and streaks ----
+{
+  const DAY = 86400000;
+  const NOW = new Date(2026, 9, 7, 18, 0).getTime();          // Wed 7 Oct 2026, 6 pm local
+  const at = (daysAgo, h = 9) => new Date(2026, 9, 7 - daysAgo, h, 0).getTime();
+  const ride = (daysAgo, miles, extra) => Object.assign({ startDate: at(daysAgo), distanceMeters: miles * 1609.344, activeRidingSeconds: miles * 300, topSpeedKPH: 20 + miles }, extra);
+
+  test('records: personal bests come from real rides only', () => {
+    const r = I.records([ride(0, 2), ride(1, 5), ride(3, 1), ride(2, 50, { simulated: true })], { now: NOW });
+    assert.strictEqual(r.rides, 3);
+    assert.strictEqual(r.longestRide.distanceMeters, 5 * 1609.344);
+    assert.strictEqual(r.fastestRide.topSpeedKPH, 25);
+    near(r.totalMeters, 8 * 1609.344, 1e-6);
+  });
+
+  test('streak counts back from today, or from yesterday before today\'s first ride', () => {
+    assert.strictEqual(I.records([ride(0, 1), ride(1, 1), ride(2, 1), ride(4, 1)], { now: NOW }).streak, 3);
+    assert.strictEqual(I.records([ride(1, 1), ride(2, 1)], { now: NOW }).streak, 2, 'no ride yet today: streak still alive');
+    assert.strictEqual(I.records([ride(2, 1), ride(3, 1)], { now: NOW }).streak, 0, 'missed yesterday: streak over');
+    assert.strictEqual(I.records([ride(0, 1), ride(0, 2, { startDate: at(0, 17) })], { now: NOW }).streak, 1, 'two rides on one day count once');
+    assert.strictEqual(I.records([ride(10, 1), ride(11, 1), ride(12, 1), ride(13, 1), ride(0, 1)], { now: NOW }).longestStreak, 4);
+  });
+
+  test('weekly distance: Monday-based weeks, oldest first, this week last', () => {
+    // NOW is a Wednesday; Monday this week = 2 days ago. Last week's Sunday = 3 days ago.
+    const r = I.records([ride(0, 2), ride(2, 3), ride(3, 4), ride(9, 1), ride(100, 9)], { now: NOW, weeks: 3 });
+    assert.strictEqual(r.weekly.length, 3);
+    near(r.thisWeekMeters, 5 * 1609.344, 1e-6);
+    near(r.weekly[1].meters, 5 * 1609.344, 1e-6, 'last week: 4 mi on Sunday + 1 mi on the Monday before');
+    assert.strictEqual(r.weekly[0].meters, 0);
+  });
+
+  test('records of nothing are empty, not errors', () => {
+    const r = I.records([], { now: NOW });
+    assert.strictEqual(r.longestRide, null);
+    assert.strictEqual(r.streak, 0);
+    assert.strictEqual(r.thisWeekMeters, 0);
+  });
+}
+
 console.log(`\n${passed} passed`);

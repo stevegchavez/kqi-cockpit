@@ -23,7 +23,9 @@
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   const GEOCODE_URL = 'https://nominatim.openstreetmap.org/search';
-  const ROUTE_URL = 'https://routing.openstreetmap.de/routed-bike/route/v1/driving';
+  const ROUTE_BASE = 'https://routing.openstreetmap.de';
+  // The service names its profiles by path; "driving" in the URL is a placeholder it ignores.
+  const PROFILES = { bike: 'routed-bike', foot: 'routed-foot' };
   const R_EARTH = 6371000;
   const METERS_PER_MILE = 1609.344;
   const OFF_ROUTE_METERS = 45;
@@ -85,7 +87,9 @@
       if (!p || !isNum(p.lat) || !isNum(p.lon)) throw new PlannerError('Both a start and a destination are needed.');
     }
     if (haversine(from.lat, from.lon, to.lat, to.lon) < 30) throw new PlannerError('Start and destination are almost the same place.');
-    const url = `${ROUTE_URL}/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson&steps=true`;
+    const profile = PROFILES[(opts && opts.profile) || 'bike'];
+    if (!profile) throw new PlannerError('Unknown route type.');
+    const url = `${ROUTE_BASE}/${profile}/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson&steps=true`;
     const body = await getJSON(url, fetchFn, opts && opts.signal, 'Routing');
     if (!body || body.code !== 'Ok' || !Array.isArray(body.routes) || !body.routes.length) {
       const why = body && body.code === 'NoRoute' ? 'No route was found between those places.' : 'Routing did not find a route.';
@@ -206,20 +210,32 @@
    */
   function locate(rt, pos, hint) {
     const n = rt.coords.length;
-    const from = Math.max(0, Math.min(n - 1, hint || 0));
-    const WINDOW = 400;                                       // vertices to look ahead of the last known position
-    let best = Infinity, index = from;
+    const from = Math.max(0, Math.min(n - 2, hint || 0));
+    const WINDOW = 400;                                       // segments to look ahead of the last known position
+    const kLon = Math.cos((pos.lat * Math.PI) / 180);
+    const M = (Math.PI / 180) * R_EARTH;                      // metres per degree of latitude
+    let best = Infinity, index = from, progress = rt.cum[from];
+    // Nearest point on each road segment (not just its corners), in a local flat projection:
+    // routes have few corners on long straight roads, and snapping to a corner would make the
+    // distance to the next turn jump by hundreds of metres.
     const scan = (lo, hi) => {
       for (let i = lo; i <= hi; i++) {
-        const d = haversine(pos.lat, pos.lon, rt.coords[i][0], rt.coords[i][1]);
-        if (d < best) { best = d; index = i; }
+        const a = rt.coords[i], b = rt.coords[i + 1];
+        const ax = (a[1] - pos.lon) * kLon * M, ay = (a[0] - pos.lat) * M;
+        const bx = (b[1] - pos.lon) * kLon * M, by = (b[0] - pos.lat) * M;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        const px = ax + t * dx, py = ay + t * dy;
+        const d = Math.sqrt(px * px + py * py);
+        if (d < best - 1e-9) { best = d; index = i; progress = rt.cum[i] + t * (rt.cum[i + 1] - rt.cum[i]); }
       }
     };
-    scan(Math.max(0, from - 5), Math.min(n - 1, from + WINDOW));
-    if (best > OFF_ROUTE_METERS * 2) scan(0, n - 1);          // lost: look everywhere
-    const progress = rt.cum[index];
-    const remaining = Math.max(0, rt.distance - progress);
-    const next = rt.steps.find((s, i) => i > 0 && s.at > progress + 8) || null;
+    scan(Math.max(0, from - 5), Math.min(n - 2, from + WINDOW));
+    if (best > OFF_ROUTE_METERS * 2) scan(0, n - 2);          // lost: look everywhere
+    const total = rt.cum[n - 1];
+    const remaining = Math.max(0, total - progress);
+    const next = rt.steps.find((s, i) => i > 0 && s.at > progress + 3) || null;
     return {
       index, offRoute: best, progress, remaining,
       next, toNext: next ? Math.max(0, next.at - progress) : null,
@@ -243,8 +259,79 @@
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
   }
 
+  // ------------------------------------------------------------------ range ring
+
+  /**
+   * How far away (straight line) the rider can go and still get back, keeping a reserve.
+   * Roads are longer than straight lines, so the distance is divided by ROAD_FACTOR.
+   * @returns {number|null} metres, or null when there is not enough data to say.
+   */
+  const ROAD_FACTOR = 1.3;
+  function reachRadius(ctx) {
+    const c = ctx || {};
+    const reserve = isNum(c.reservePct) ? c.reservePct : 10;
+    if (!isNum(c.soc) || !isNum(c.milesPerPct) || c.milesPerPct <= 0) return null;
+    const usable = c.soc - reserve;
+    if (usable <= 0) return 0;
+    return ((usable * c.milesPerPct) / 2 / ROAD_FACTOR) * METERS_PER_MILE;
+  }
+
+  // ------------------------------------------------------------------ spoken directions
+
+  /** Distance as it should be spoken: "300 feet", "0.4 miles", "200 metres", "1.5 kilometres". */
+  function spokenDistance(meters, useMiles) {
+    if (useMiles) {
+      const ft = meters * 3.28084;
+      if (ft < 1000) return `${Math.max(50, Math.round(ft / 50) * 50)} feet`;
+      const mi = meters / METERS_PER_MILE;
+      return mi < 9.95 ? `${mi.toFixed(1)} miles` : `${Math.round(mi)} miles`;
+    }
+    if (meters < 1000) return `${Math.max(50, Math.round(meters / 50) * 50)} metres`;
+    const km = meters / 1000;
+    return km < 9.95 ? `${km.toFixed(1)} kilometres` : `${Math.round(km)} kilometres`;
+  }
+
+  const NEAR_METERS = 160;
+  const NOW_METERS = 35;
+  const STAGE_RANK = { far: 1, near: 2, now: 3 };
+
+  /**
+   * Decides what (if anything) to say for this GPS update. Each step is announced at most once
+   * per stage: when it first becomes the next step (if still far off), when it is near, and as
+   * the rider reaches it. Leaving the route and arriving are announced once each.
+   * @param {object} loc  result of locate()
+   * @param {object|null} prev  the state returned last time (null to start)
+   * @param {object[]} steps  route steps
+   * @returns {{text: string|null, state: object}}
+   */
+  function voiceCue(loc, prev, steps, useMiles) {
+    const p = prev || { i: -1, rank: 0, off: false, arrived: false };
+    const st = { i: p.i, rank: p.rank, off: false, arrived: p.arrived };
+    if (loc.arrived) {
+      st.arrived = true;
+      return { text: p.arrived ? null : 'You have arrived.', state: st };
+    }
+    if (loc.isOff) {
+      st.off = true;
+      return { text: p.off ? null : 'You are off the route.', state: st };
+    }
+    if (!loc.next) return { text: null, state: st };
+    const i = steps.indexOf(loc.next);
+    const stage = loc.toNext <= NOW_METERS ? 'now' : loc.toNext <= NEAR_METERS ? 'near' : 'far';
+    const rank = STAGE_RANK[stage];
+    const fresh = i !== p.i;
+    if (!fresh && rank <= p.rank) return { text: null, state: st };
+    st.i = i; st.rank = rank;
+    const what = loc.next.text;
+    const text = stage === 'now'
+      ? `${what}.`
+      : `In ${spokenDistance(loc.toNext, useMiles)}, ${what.charAt(0).toLowerCase()}${what.slice(1)}.`;
+    return { text, state: st };
+  }
+
   return {
     PlannerError, geocode, route, parseRoute, instruction, estimate, locate,
-    formatDistance, formatMinutes, haversine, METERS_PER_MILE, OFF_ROUTE_METERS, ARRIVED_METERS,
+    reachRadius, voiceCue, spokenDistance,
+    formatDistance, formatMinutes, haversine, METERS_PER_MILE, OFF_ROUTE_METERS, ARRIVED_METERS, ROAD_FACTOR,
   };
 });

@@ -932,3 +932,85 @@ body {
 .gauge-wrap::before { inset: 3% -2%; }
 .gauge-wrap { margin-top: 12px; margin-bottom: 4px; }
 .screen-title, .diag-entry-title { padding-left: 22px; }
+
+/* ---------- Plan: quick chips, parked card, save row, round trip, voice ---------- */
+.plan-quick { display: flex; gap: 8px; overflow-x: auto; margin: 10px -2px 0; padding: 2px; scrollbar-width: none; }
+.plan-quick::-webkit-scrollbar { display: none; }
+.plan-chip {
+  flex: 0 0 auto; padding: 8px 13px; font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  font-family: "Space Grotesk", sans-serif; color: var(--paper); background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12); clip-path: var(--chamfer-sm); white-space: nowrap;
+}
+.plan-chip:active { border-color: var(--ember); color: var(--ember); }
+.plan-chip.home, .plan-chip.work { color: var(--ember); border-color: rgba(255,176,32,0.4); }
+.plan-chip.range { color: #4fe07a; border-color: rgba(79,224,122,0.4); }
+.plan-chip.park { color: var(--signal); border-color: rgba(94,200,216,0.4); }
+.plan-parked {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 12px 12px 12px 14px;
+  border: 1px solid rgba(94,200,216,0.35); background: linear-gradient(90deg, rgba(94,200,216,0.14), rgba(94,200,216,0.02));
+  clip-path: var(--chamfer);
+}
+.plan-parked[hidden] { display: none; }
+.plan-parked-info { flex: 1; min-width: 0; }
+.plan-parked-title { font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-style: italic; }
+.plan-parked-sub { font-size: 11.5px; color: var(--graphite); margin-top: 2px; }
+.plan-parked .btn { flex: 0 0 auto; padding: 8px 12px; }
+.plan-save { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.plan-save[hidden] { display: none; }
+.plan-save-label { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--graphite); margin-right: 2px; }
+.plan-round { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; }
+.plan-round-label { color: var(--graphite); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; font-size: 11px; }
+.plan-round-val { text-align: right; font-variant-numeric: tabular-nums; }
+.plan-round.warn .plan-round-val { color: #ffd23f; }
+.plan-actions .btn.voice { flex: 0 0 auto; padding: 0 14px; font-size: 12px; color: var(--graphite); }
+.plan-actions .btn.voice.on { color: #4fe07a; border-color: rgba(79,224,122,0.4); }
+
+/* ---------- Garage: odometer, records, maintenance ---------- */
+.garage { margin-top: 12px; }
+.odo-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.odo-label { font-size: 10px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; color: var(--graphite); }
+.odo-value { display: flex; align-items: baseline; gap: 6px; }
+.odo-value .numeral {
+  font-size: 46px; line-height: 1; font-variant-numeric: tabular-nums; display: inline-block; transform: skewX(-8deg);
+  background: linear-gradient(180deg, #fff6e0, #ffb020); -webkit-background-clip: text; background-clip: text; color: transparent;
+  letter-spacing: 1px;
+}
+.odo-value small { font-size: 13px; font-weight: 700; color: var(--graphite); }
+.odo-form { margin-top: 10px; }
+.odo-form[hidden] { display: none; }
+.odo-form label { display: block; font-size: 11.5px; color: var(--graphite); margin-bottom: 6px; }
+.odo-form-row { display: flex; gap: 8px; }
+.odo-form input {
+  flex: 1; min-width: 0; background: rgba(0,0,0,0.35); color: var(--paper); border: 1px solid rgba(255,255,255,0.14);
+  padding: 10px 12px; font-size: 16px; font-family: "Space Grotesk", sans-serif; clip-path: var(--chamfer-sm);
+}
+.garage .rides-summary { margin: 14px 0 0; box-shadow: none; }
+.week-bars { display: flex; align-items: flex-end; gap: 5px; height: 46px; margin: 14px 2px 4px; }
+.week-bar { flex: 1; background: rgba(255,176,32,0.28); transform: skewX(-12deg); min-height: 3px; }
+.week-bar.current { background: linear-gradient(180deg, #ffd36b, #ff8f1f); box-shadow: 0 0 10px rgba(255,160,30,0.5); }
+.records { list-style: none; margin: 10px 0 0; padding: 0; }
+.records li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.records .k { color: var(--graphite); }
+.records .v { grid-row: span 2; align-self: center; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ember); }
+.records .w { font-size: 10.5px; color: #555a61; }
+.maint-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.maint-item { display: flex; align-items: center; gap: 10px; padding: 10px 0 10px 10px; border-bottom: 1px dashed var(--line); box-shadow: inset 3px 0 0 #2b2e33; }
+.maint-item.soon { box-shadow: inset 3px 0 0 #ffd23f; }
+.maint-item.due { box-shadow: inset 3px 0 0 var(--redline); }
+.maint-info { flex: 1; min-width: 0; }
+.maint-name { font-size: 13.5px; font-weight: 600; }
+.maint-sub { font-size: 11px; color: var(--graphite); margin-top: 2px; }
+.maint-item.due .maint-sub { color: #ff7a6e; }
+.maint-item.soon .maint-sub { color: #ffd23f; }
+.maint-item .btn { flex: 0 0 auto; padding: 7px 13px; }
+.chip.warn { color: var(--redline); border-color: rgba(255,68,56,0.45); background: var(--redline-dim); }
+.tab-btn.has-badge::after {
+  content: ""; position: absolute; top: 4px; right: calc(50% - 16px); width: 8px; height: 8px;
+  background: var(--redline); transform: rotate(45deg); box-shadow: 0 0 8px rgba(255,68,56,0.8);
+}
+#ridesListTitle { margin-top: 18px; }
+.plan-parked { flex-wrap: wrap; }
+.plan-parked-info { flex: 1 1 100%; }
+.plan-parked .btn.primary { flex: 1; }
+.plan-actions #planFollow { flex: 1.7; white-space: nowrap; }
+.plan-actions #planClear { flex: 0 0 auto; padding: 0 16px; }

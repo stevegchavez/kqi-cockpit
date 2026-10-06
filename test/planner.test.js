@@ -171,5 +171,70 @@ const okJSON = (body) => async () => ({ ok: true, status: 200, json: async () =>
     assert.strictEqual(Pl.formatMinutes(75), '1 h 15 min');
   });
 
+  await test('foot routing uses the walking profile', async () => {
+    let seen;
+    await Pl.route({ lat: north(0), lon: ORIGIN.lon }, { lat: north(1000), lon: east(500) }, async (u) => { seen = u; return { ok: true, json: async () => osrmBody() }; }, { profile: 'foot' });
+    assert.ok(seen.startsWith('https://routing.openstreetmap.de/routed-foot/route/v1/driving/'), seen);
+    await assert.rejects(() => Pl.route({ lat: north(0), lon: ORIGIN.lon }, { lat: north(1000), lon: ORIGIN.lon }, okJSON({}), { profile: 'car' }), /Unknown route type/);
+  });
+
+  await test('reach radius: half the usable battery, keeping a reserve, shrunk for roads', () => {
+    // 60% battery, 10% reserve -> 50% usable x 0.25 mi/% = 12.5 mi of riding -> 6.25 mi out, /1.3 for roads
+    const r = Pl.reachRadius({ soc: 60, milesPerPct: 0.25 });
+    assert.ok(Math.abs(r - (6.25 / 1.3) * 1609.344) < 0.01, `got ${r}`);
+    assert.strictEqual(Pl.reachRadius({ soc: 8, milesPerPct: 0.25 }), 0, 'below the reserve there is no reach');
+    assert.strictEqual(Pl.reachRadius({ soc: 60 }), null, 'unknown without ride history');
+    assert.strictEqual(Pl.reachRadius({ milesPerPct: 0.25 }), null, 'unknown without a battery reading');
+  });
+
+  await test('spoken distances are rounded the way people say them', () => {
+    assert.strictEqual(Pl.spokenDistance(91, true), '300 feet');
+    assert.strictEqual(Pl.spokenDistance(5, true), '50 feet');
+    assert.strictEqual(Pl.spokenDistance(644, true), '0.4 miles');
+    assert.strictEqual(Pl.spokenDistance(240, false), '250 metres');
+    assert.strictEqual(Pl.spokenDistance(1500, false), '1.5 kilometres');
+  });
+
+  await test('voice: each turn is announced far, near and at the turn, once each', async () => {
+    const rt = Pl.parseRoute(osrmBody().routes[0]);
+    const said = [];
+    let st = null;
+    for (const m of [300, 320, 500, 700, 850, 860, 900, 970, 980]) {
+      const loc = Pl.locate(rt, { lat: north(m), lon: ORIGIN.lon }, 0);
+      const r = Pl.voiceCue(loc, st, rt.steps, true);
+      st = r.state;
+      if (r.text) said.push(r.text);
+    }
+    assert.deepStrictEqual(said, [
+      'In 0.4 miles, turn right onto Oak Avenue.',
+      'In 500 feet, turn right onto Oak Avenue.',
+      'Turn right onto Oak Avenue.',
+    ]);
+  });
+
+  await test('voice: leaving the route and arriving are announced once', async () => {
+    const rt = Pl.parseRoute(osrmBody().routes[0]);
+    let st = null;
+    const cue = (lat, lon) => { const r = Pl.voiceCue(Pl.locate(rt, { lat, lon }, 0), st, rt.steps, false); st = r.state; return r.text; };
+    cue(north(100), ORIGIN.lon);
+    assert.strictEqual(cue(north(500), east(-150)), 'You are off the route.');
+    assert.strictEqual(cue(north(510), east(-150)), null);
+    cue(north(600), ORIGIN.lon);
+    assert.strictEqual(cue(north(520), east(-150)), 'You are off the route.', 'a second departure is announced again');
+    assert.strictEqual(cue(north(1000), east(495)), 'You have arrived.');
+    assert.strictEqual(cue(north(1000), east(498)), null);
+  });
+
+  await test('locate: on a long straight road with few points, distance to the turn is still exact', () => {
+    // Only three corners: 0 m, 1000 m north (turn), then 500 m east.
+    const body = osrmBody();
+    body.routes[0].geometry.coordinates = [[ORIGIN.lon, north(0)], [ORIGIN.lon, north(1000)], [east(500), north(1000)]];
+    const rt = Pl.parseRoute(body.routes[0]);
+    const l = Pl.locate(rt, { lat: north(613), lon: east(6) }, 0);   // a little to the side of the road
+    assert.ok(Math.abs(l.toNext - 387) < 2, `toNext ${l.toNext}`);
+    assert.ok(Math.abs(l.offRoute - 6) < 0.5, `offRoute ${l.offRoute}`);
+    assert.ok(Math.abs(l.remaining - 887) < 3, `remaining ${l.remaining}`);
+  });
+
   console.log(`\n${passed} passed`);
 })();

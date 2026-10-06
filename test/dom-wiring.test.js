@@ -47,7 +47,7 @@ window.L = {
 // desktop browser without BLE/GPS — app.js is expected to degrade
 // gracefully rather than throw.
 
-const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'planner.js', 'plan-ui.js', 'geo.js', 'app.js'];
+const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'garage.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'planner.js', 'plan-ui.js', 'geo.js', 'app.js'];
 
 let passed = 0;
 const queue = [];
@@ -257,6 +257,166 @@ test('Plan: errors from the network are shown in plain words', async () => {
   assert.ok(/could not reach the internet/.test(d.getElementById('planStatus').textContent));
 });
 
+// ---- Plan extras: voice, saved places, find my scooter, range (fresh windows) ----
+function planApp() {
+  const app = bootApp({ bluetooth: false });
+  const spoken = [];
+  app.w.speechSynthesis = { cancel() {}, speak(u) { spoken.push(u.text); } };
+  app.w.SpeechSynthesisUtterance = function (text) { this.text = text; };
+  const requests = [];
+  app.w.fetch = async (url) => {
+    requests.push(String(url));
+    if (String(url).includes('nominatim')) return { ok: true, json: async () => [{ display_name: 'Cafe One, Main St, Town', lat: String(planNorth(2000)), lon: String(PLAN_ORIGIN.lon) }] };
+    return { ok: true, json: async () => planRouteBody() };
+  };
+  app.geo.here = { latitude: planNorth(0), longitude: PLAN_ORIGIN.lon };
+  app.tab('planScreen');
+  return Object.assign(app, { spoken, requests });
+}
+async function planTo(app, q) {
+  app.$('planTo').value = q;
+  app.$('planSearch').click();
+  await until(() => app.w.document.querySelector('#planResults .plan-result'), 'search results');
+  app.w.document.querySelector('#planResults .plan-result').click();
+  await until(() => app.$('planSummary').hidden === false, 'the route summary');
+}
+const at = (app, north) => app.geo.cb({ coords: { latitude: planNorth(north), longitude: PLAN_ORIGIN.lon, accuracy: 5 } });
+
+test('Plan: directions are spoken at each stage of a turn, and voice can be switched off', async () => {
+  const app = planApp();
+  await planTo(app, 'cafe');
+  app.$('planVoice').click(); app.$('planVoice').click();          // off and on again: button reflects the browser having speech
+  assert.strictEqual(app.$('planVoice').textContent, 'Voice: on');
+  app.spoken.length = 0;
+  app.$('planFollow').click();
+  await until(() => app.geo.cb, 'GPS watch');
+  assert.deepStrictEqual(app.spoken, ['Starting directions.']);
+  at(app, 300); at(app, 320); at(app, 900); at(app, 990);
+  assert.deepStrictEqual(app.spoken.slice(1), [
+    'In 0.4 miles, turn left onto Oak Avenue.',
+    'In 350 feet, turn left onto Oak Avenue.',
+    'Turn left onto Oak Avenue.',
+  ]);
+  app.$('planVoice').click();
+  assert.strictEqual(app.$('planVoice').textContent, 'Voice: off');
+  assert.strictEqual(app.w.localStorage.getItem('niu.voice'), 'false', 'the choice is remembered');
+  const before = app.spoken.length;
+  at(app, 1995);
+  assert.strictEqual(app.spoken.length, before, 'nothing spoken with voice off');
+  assert.strictEqual(app.$('planBannerText').textContent, 'You have arrived');
+  app.w.close();
+});
+
+test('Plan: a destination can be saved as Home and planned again with one tap', async () => {
+  const app = planApp();
+  await planTo(app, 'cafe');
+  const homeBtn = [...app.$('planSave').querySelectorAll('button')].find((b) => b.textContent === 'Home');
+  homeBtn.click();
+  const saved = JSON.parse(app.w.localStorage.getItem('niu.places'));
+  assert.deepStrictEqual(saved.map((p) => p.label), ['Home']);
+  assert.match(app.$('planSave').textContent, /Saved as Home/);
+  const chip = [...app.$('planQuick').querySelectorAll('.plan-chip')].find((b) => b.textContent === 'Home');
+  assert.ok(chip, 'a Home chip appears');
+  app.$('planClear').click();
+  const routed = app.requests.filter((u) => u.includes('routed-bike')).length;
+  chip.click();
+  await until(() => app.requests.filter((u) => u.includes('routed-bike')).length === routed + 1, 'a new route request');
+  await until(() => app.$('planSummary').hidden === false, 'the summary');
+  assert.ok(app.requests.filter((u) => u.includes('nominatim')).length === 1, 'no new search needed');
+  app.w.close();
+});
+
+test('Plan: Park here, then Walk back plans a walking route to the scooter', async () => {
+  const app = planApp();
+  assert.strictEqual(app.$('planParked').hidden, true);
+  [...app.$('planQuick').querySelectorAll('.plan-chip')].find((b) => b.textContent === 'Park here').click();
+  await until(() => app.$('planParked').hidden === false, 'the parked card');
+  assert.match(app.$('planParked').textContent, /Parked just now/);
+  app.geo.here = { latitude: planNorth(2000), longitude: PLAN_ORIGIN.lon };          // walked away
+  [...app.$('planParked').querySelectorAll('button')].find((b) => b.textContent === 'Walk back').click();
+  await until(() => app.requests.some((u) => u.includes('routed-foot')), 'a walking route request');
+  await until(() => app.$('planSummary').hidden === false, 'the summary');
+  assert.match(app.$('planSummary').textContent, /Walking route back to your scooter/);
+  assert.strictEqual(app.$('planSave').hidden, true, 'no "save as" for the walk back');
+  [...app.$('planParked').querySelectorAll('button')].find((b) => b.textContent === 'Forget').click();
+  assert.strictEqual(app.w.localStorage.getItem('niu.parked'), null);
+  app.w.close();
+});
+
+test('Plan: Range explains what it needs, and draws a circle once it has data', async () => {
+  const app = planApp();
+  const range = () => [...app.$('planQuick').querySelectorAll('.plan-chip')].find((b) => b.textContent === 'Range').click();
+  range();
+  await wait(20);
+  assert.match(app.$('planStatus').textContent, /Connect the scooter to see your range/);
+  assert.strictEqual(app.leaflet.circles.length, 0);
+  app.w.close();
+});
+
+test('Plan: Range draws a reach circle when battery and ride history are known', async () => {
+  const app = bootApp();
+  const store = new app.w.NIU.RideStore();
+  const mi = 1609.344;
+  for (let i = 1; i <= 3; i++) {
+    await store.saveRide({ id: `r${i}`, startDate: Date.now() - i * 86400000, endDate: Date.now(), distanceMeters: 2.5 * mi, startSOC: 80, endSOC: 70,
+      topSpeedKPH: 20, averageSpeedKPH: 15, activeRidingSeconds: 600, points: [], simulated: false });
+  }
+  await connect(app);
+  app.tab('ridesScreen');                        // loads the rides into the app
+  await until(() => app.w.document.querySelectorAll('.ride-row').length === 3, 'rides');
+  app.geo.here = { latitude: 40, longitude: -100 };
+  app.tab('planScreen');
+  [...app.$('planQuick').querySelectorAll('.plan-chip')].find((b) => b.textContent === 'Range').click();
+  await until(() => app.leaflet.circles.length === 1, 'the range circle');
+  // 59% battery, 0.25 mi per %, 10% reserve: (49 x 0.25 / 2 / 1.3) mi
+  const expected = (49 * 0.25 / 2 / 1.3) * mi;
+  assert.ok(Math.abs(app.leaflet.circles[0].opts.radius - expected) < 1, `radius ${app.leaflet.circles[0].opts.radius}`);
+  assert.match(app.$('planStatus').textContent, /With 59% you can go about 4\.7\d mi/);
+  app.w.close();
+});
+
+test('Rides: odometer, matching it to the scooter, records, and maintenance reminders', async () => {
+  const app = bootApp({ bluetooth: false });
+  const store = new app.w.NIU.RideStore();
+  const mi = 1609.344;
+  const day = 86400000;
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  const now = noon.getTime();                        // fixed times of day, so the streak doesn't depend on when tests run
+  await store.saveRide({ id: 'a', startDate: now, endDate: now, distanceMeters: 60 * mi, topSpeedKPH: 29, averageSpeedKPH: 18, activeRidingSeconds: 3600, points: [], simulated: false });
+  await store.saveRide({ id: 'b', startDate: now - day, endDate: now - day, distanceMeters: 45 * mi, topSpeedKPH: 25, averageSpeedKPH: 17, activeRidingSeconds: 2400, points: [], simulated: false });
+  await store.saveRide({ id: 'c', startDate: now - 2 * day, endDate: now - 2 * day, distanceMeters: 500 * mi, topSpeedKPH: 30, averageSpeedKPH: 20, activeRidingSeconds: 9000, points: [], simulated: true });
+  app.tab('ridesScreen');
+  await until(() => app.w.document.querySelectorAll('.ride-row').length === 3, 'ride rows');
+  assert.strictEqual(app.$('odoValue').textContent, '105.0', 'demo rides do not count');
+  assert.strictEqual(app.$('streakVal').textContent, '2');
+  assert.strictEqual(app.$('ridesTotalCount').textContent, '2');
+  assert.strictEqual(app.$('weekBars').children.length, 8);
+  assert.match(app.$('recordsList').textContent, /Longest ride60\.00 mi/);
+  // 105 mi with nothing logged: tyre pressure (every 100 mi) is due
+  assert.match(app.$('maintBadge').textContent, /^1 due$/);
+  assert.ok(app.$('ridesTabBtn').classList.contains('has-badge'), 'the Rides tab shows a reminder dot');
+  const tyres = [...app.$('maintList').children].find((li) => /tyre pressure/.test(li.textContent));
+  assert.ok(tyres.classList.contains('due'));
+  tyres.querySelector('button').click();
+  assert.strictEqual(app.$('maintBadge').hidden, true);
+  assert.ok(!app.$('ridesTabBtn').classList.contains('has-badge'));
+  assert.match([...app.$('maintList').children].find((li) => /tyre pressure/.test(li.textContent)).textContent, /In 100 mi/);
+
+  app.$('odoSetBtn').click();
+  app.$('odoInput').value = '412.5';
+  app.$('odoForm').dispatchEvent(new app.w.Event('submit', { cancelable: true }));
+  assert.strictEqual(app.$('odoValue').textContent, '412.5');
+  assert.strictEqual(app.$('odoForm').hidden, true);
+  // the tyre check was logged at 105 mi; the odometer now reads 412.5, so it is due again
+  assert.ok([...app.$('maintList').children].find((li) => /tyre pressure/.test(li.textContent)).classList.contains('due'));
+
+  app.$('odoSetBtn').click();
+  app.$('odoInput').value = '-3';
+  app.$('odoForm').dispatchEvent(new app.w.Event('submit', { cancelable: true }));
+  assert.strictEqual(app.$('odoValue').textContent, '412.5', 'a bad reading is refused');
+  app.w.close();
+});
+
 test('page loads no third-party script (the scooter keys live in this origin\'s localStorage)', () => {
   const srcs = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(srcs.length >= 8, `expected the app scripts, found ${srcs.length}`);
@@ -374,16 +534,19 @@ function bootApp({ bluetooth = true, keys = true, extraFields = null } = {}) {
   const w = new JSDOM(html, { url: 'https://example.com/index.html', runScripts: 'outside-only', pretendToBeVisual: true }).window;
   w.indexedDB = new IDBFactory();           // private, empty database per window
   w.IDBKeyRange = FakeIDBKeyRange;
-  const leaflet = { polylines: [] };
+  const leaflet = { polylines: [], circles: [] };
   w.L = {
-    map: () => ({ remove() {}, setView() { return this; }, fitBounds() {} }),
+    map: () => ({ remove() {}, setView() { return this; }, fitBounds() {}, invalidateSize() {} }),
     tileLayer: () => ({ addTo() { return this; } }),
-    polyline: (latlngs, opts) => { leaflet.polylines.push({ latlngs, opts }); return { addTo() { return this; } }; },
-    circleMarker: () => ({ addTo() { return this; } }),
+    polyline: (latlngs, opts) => { leaflet.polylines.push({ latlngs, opts }); return { addTo() { return this; }, getBounds() { return {}; }, remove() {} }; },
+    circleMarker: () => ({ addTo() { return this; }, remove() {}, setLatLng() {} }),
+    circle: (center, opts) => { const c = { center, opts, removed: false, addTo() { return this; }, remove() { this.removed = true; }, getBounds() { return {}; } }; leaflet.circles.push(c); return c; },
     latLngBounds: (l) => l,
   };
   const geo = {
     cb: null,
+    here: { latitude: 40, longitude: -100 },
+    getCurrentPosition(ok) { ok({ coords: Object.assign({ accuracy: 5 }, this.here) }); },
     watchPosition(ok) { this.cb = ok; return 1; },
     clearWatch() { this.cb = null; },
     emit(lat, lon, t, alt) { if (this.cb) this.cb({ coords: { latitude: lat, longitude: lon, accuracy: 5, altitude: alt, speed: 5 }, timestamp: t }); },
@@ -465,6 +628,9 @@ test('E2E: a ride records battery at start and end, shows insights, and exports 
   assert.strictEqual(ride.endSOC, 53);
   assert.strictEqual(ride.simulated, false);
   assert.ok(ride.points.length >= 10);
+  const parked = JSON.parse(app.w.localStorage.getItem('niu.parked'));
+  const lastPt = ride.points[ride.points.length - 1];
+  assert.deepStrictEqual([parked.lat, parked.lon, parked.source], [lastPt.lat, lastPt.lon, 'ride'], 'the end of the ride is remembered as the parking spot');
 
   app.tab('ridesScreen');
   await until(() => app.w.document.querySelector('.ride-row'), 'the ride row');
