@@ -3,8 +3,8 @@
  *
  * Deliberately implemented from the protocol description using Node's own
  * crypto and plain byte handling, NOT js/protocol.js, so a bug shared by both
- * sides can't hide. It speaks only what the dashboard needs: the two-step
- * password handshake and field reads.
+ * sides can't hide. It speaks the two-step password handshake, field reads, and
+ * single-frame field writes (the commands the app's Controls can send).
  */
 const nodeCrypto = require('crypto');
 
@@ -29,8 +29,13 @@ class FakeScooter {
    * @param {string} o.aesKey   16-char bleAes
    * @param {Object<string,{len:number,value?:number,text?:string}>} o.fields by 6-hex-digit code
    * @param {string[]} [o.refuse] codes the scooter refuses (error 0x40)
+   * @param {Object<string,number>} [o.writable] code -> value length for fields that accept writes
    */
-  constructor({ password, aesKey, fields, refuse = [] }) {
+  constructor({ password, aesKey, fields, refuse = [], writable = { '210016': 2, '11000F': 1 } }) {
+    this.writable = writable;
+    this.writes = [];              // every accepted write: {code, value}
+    this.refuseWrites = false;     // when true, answers writes with error 0x40
+    this.writeResult = 0x00;       // result byte in the write acknowledgement (0 = ok)
     this.password = password;
     this.aesKey = aesKey;
     this.fields = fields;
@@ -74,6 +79,20 @@ class FakeScooter {
         return [frame([0x01, 0x83], 0x00, aes(this.password, Buffer.concat([Buffer.from([0x00]), nodeCrypto.randomBytes(15)]), true))];
       }
       return [frame([0x01, 0xc3], 0x00, aes(this.password, Buffer.concat([Buffer.from([0x2a]), Buffer.alloc(15)]), true))];
+    }
+    if (h0 === 0x01 && h1 === 0x22 && idx === 0x00) {            // single-frame write request
+      if (!this.verified) return [];
+      const data = aes(this.aesKey, payload, false);
+      const code = data.subarray(0, 3).toString('hex').toUpperCase();
+      const len = this.writable[code];
+      this.log.push('write ' + code);
+      if (this.refuseWrites || !len) {
+        return [frame([0x01, 0xe2], 0x00, aes(this.aesKey, Buffer.concat([Buffer.from([0x40]), Buffer.alloc(15)]), true))];
+      }
+      let value = 0;
+      for (let i = 0; i < len; i++) value = value * 256 + data[3 + i];
+      this.writes.push({ code, value });
+      return [frame([0x01, 0xa2], 0x00, aes(this.aesKey, Buffer.concat([Buffer.from([this.writeResult]), Buffer.alloc(15)]), true))];
     }
     if (h0 === 0x01 && (h1 === 0x21 || h1 === 0x01)) {           // read request (first / continuation)
       if (!this.verified) return [];

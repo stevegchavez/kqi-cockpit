@@ -134,5 +134,19 @@ unk_plain += "0" * (32 - len(unk_plain))
 uf = "0127" + "00" + P.aes_enc(unk_plain, AES)
 out["pushUnknown"] = {"frame": uf + P.checksum(uf), "expected": _no_padding(P.parse_push(uf + P.checksum(uf), AES))}
 
+# writes (commands): exactly the ones the app's Controls allow, plus the scooter's replies
+out["writes"] = {}
+for wname, (field_name, value) in {
+    "lock": ("foc_k_cmd", 1), "unlock": ("foc_k_cmd", 2),
+    "alarmOn": ("db_k_cmd", 6), "alarmOff": ("db_k_cmd", 5),
+}.items():
+    out["writes"][wname] = {"field": field_name, "value": value, "frames": P.build_write({field_name: value}, AES)}
+ack = "01a2" + "00" + P.aes_enc("00" + "00" * 15, AES)
+out["writeAck"] = {"frame": ack + P.checksum(ack), "result": P.parse_write_frames([ack + P.checksum(ack)], AES)}
+ackbad = "01a2" + "00" + P.aes_enc("03" + "00" * 15, AES)
+out["writeAckNonZero"] = {"frame": ackbad + P.checksum(ackbad), "result": P.parse_write_frames([ackbad + P.checksum(ackbad)], AES)}
+werr = "01e2" + "00" + P.aes_enc("40" + "00" * 15, AES)
+out["writeErr"] = {"frame": werr + P.checksum(werr), "code": "40"}
+
 json.dump(out, sys.stdout, indent=1, sort_keys=True)
 print()

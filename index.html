@@ -90,6 +90,16 @@
       <div class="readout"><div id="cyclesVal" class="v">&ndash;</div><div class="t">Cycles</div></div>
     </div>
 
+    <div id="controlsBar" class="controls-bar" hidden>
+      <div class="controls-row">
+        <button id="lockBtn" class="ctl-btn lock" data-cmd="lock" type="button"><span>Lock</span></button>
+        <button id="unlockBtn" class="ctl-btn" data-cmd="unlock" type="button"><span>Unlock</span></button>
+        <button id="alarmOnBtn" class="ctl-btn alarm" data-cmd="alarmOn" type="button"><span>Alarm on</span></button>
+        <button id="alarmOffBtn" class="ctl-btn" data-cmd="alarmOff" type="button"><span>Alarm off</span></button>
+      </div>
+      <div id="controlsStatus" class="controls-status" role="status">Hold a button to send it.</div>
+    </div>
+
     <div class="spacer"></div>
 
     <button id="demoToggleBtn" class="demo-toggle">Simulate telemetry (no scooter)</button>
@@ -224,14 +234,25 @@
       </div>
       <div id="keysStatus" class="keys-status" role="status">No keys saved</div>
       </section>
+      <section id="controlsCard" class="card controls-card">
+      <div class="card-head"><h3>Lock &amp; alarm</h3><span id="controlsChip" class="chip">Off</span></div>
+      <p class="hint">Lets this app lock the motor and switch the scooter's alarm, the way the NIU app does. Until you turn this on, the app only ever reads from the scooter.</p>
+      <ul class="controls-rules">
+        <li>Lock and unlock only work when the scooter reports 0 km/h and no ride is being recorded. There is no way to cut power while riding.</li>
+        <li>Not yet tested on a KQi 200F. Try it first with the scooter on its stand.</li>
+        <li>Works within Bluetooth range only (about 10–30 m). It is a deterrent, not a replacement for a physical lock.</li>
+      </ul>
+      <label class="check"><input id="controlsAck" type="checkbox" /> I understand, and this is my scooter</label>
+      <button id="controlsToggleBtn" class="btn wide" type="button" disabled>Turn on lock &amp; alarm</button>
+      </section>
       <section class="card">
       <div class="card-head"><h3>Diagnostics</h3><span class="chip muted">Advanced</span></div>
       <p class="hint">Find out which values your scooter reports, compare them before and after you do something, and export a report to share. Read-only.</p>
       <button id="openDiagBtn" class="btn wide">Open Diagnostics</button>
       </section>
       <section class="card quiet">
-      <div class="card-head"><h3>Privacy</h3><span class="chip ok">Read-only</span></div>
-      <p class="hint small">This app only reads status from your scooter and never sends commands. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
+      <div class="card-head"><h3>Privacy</h3><span id="privacyChip" class="chip ok">Read-only</span></div>
+      <p class="hint small">This app only reads status from your scooter unless you turn on Lock &amp; alarm above; then it can send exactly four commands (lock, unlock, alarm on, alarm off) and nothing else. Anyone who can use this browser profile could read the stored keys, so remove them here before handing the device to someone else.</p>
       </section>
     </div>
   </section>
@@ -339,6 +360,7 @@
 <script src="js/constants.js"></script>
 <script src="js/crypto.js"></script>
 <script src="js/protocol.js"></script>
+<script src="js/controls.js"></script>
 <script src="js/session.js"></script>
 <script src="js/keystore.js"></script>
 <script src="js/ble.js"></script>

@@ -8,6 +8,8 @@ The NIU KQi Bluetooth frame format, the password handshake, and the field codes/
 <https://github.com/BaesTheorem/niu-kqi>, which is MIT licensed. `js/protocol.js` is an
 independent JavaScript implementation, checked byte-for-byte against that project's Python
 reference using test vectors (`test/fixtures/`), but it relies on that project's findings.
+The write frame format and the lock/unlock (`foc_k_cmd` 1/2) and alarm (`db_k_cmd` 5/6)
+command numbers used by `js/controls.js` come from the same project.
 
 ```
 MIT License

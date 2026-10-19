@@ -72,6 +72,23 @@ test('READ-ONLY: the only frames ever written are handshake and read requests', 
   }
 });
 
+test('a command is one 0122 frame sent with polling paused; everything else stays reads', async () => {
+  const Controls = require('../js/controls.js');
+  const Fields = require('../js/fields.js');
+  const { mgr, fb, scooter } = setup();
+  scooter.fields['21000B'].value = 0;                     // standing still
+  await mgr.connect(KEYS);
+  await sleep(60);
+  await mgr.withPollingPaused((session) => Controls.send(session, 'lock', { aes: AES, enabled: true, isRiding: false, fieldTable: Fields.FIELDS }));
+  await sleep(60);
+  mgr.disconnect();
+  const commands = fb.written.filter((f) => f.startsWith('0122'));
+  assert.strictEqual(commands.length, 1);
+  assert.deepStrictEqual(scooter.writes, [{ code: '210016', value: 1 }]);
+  const allowed = new Set(['0123', '0103', '0121', '0101', '0122']);
+  for (const f of fb.written) assert.ok(allowed.has(f.slice(0, 4)), `unexpected frame header ${f.slice(0, 4)}`);
+});
+
 test('falls back to writeValue when writeValueWithResponse is unavailable', async () => {
   const { mgr, events } = setup({ noWithResponse: true });
   await mgr.connect(KEYS);
