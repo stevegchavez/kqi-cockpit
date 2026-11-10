@@ -47,7 +47,7 @@ window.L = {
 // desktop browser without BLE/GPS — app.js is expected to degrade
 // gracefully rather than throw.
 
-const files = ['constants.js', 'crypto.js', 'protocol.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'garage.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'planner.js', 'plan-ui.js', 'geo.js', 'app.js'];
+const files = ['constants.js', 'crypto.js', 'protocol.js', 'controls.js', 'session.js', 'keystore.js', 'ble.js', 'storage.js', 'insights.js', 'exporters.js', 'charts.js', 'battery.js', 'garage.js', 'fields.js', 'diagnostics.js', 'diag-ui.js', 'planner.js', 'plan-ui.js', 'geo.js', 'app.js'];
 
 let passed = 0;
 const queue = [];
@@ -153,11 +153,16 @@ test('battery cell strip renders 10 segments after simulated telemetry', () => {
   window.document.getElementById('demoToggleBtn').click(); // stop, cleanup interval
 });
 
-test('there are no controls that change the scooter (read-only app)', () => {
+test('the only scooter controls are lock, unlock, alarm on/off, and they are off and hidden by default', () => {
   const d = window.document;
   assert.strictEqual(d.getElementById('headlightBtn'), null);
-  assert.strictEqual(d.getElementById('lockBtn'), null);
   assert.strictEqual(d.querySelectorAll('.rocker, .switch').length, 0);
+  const cmds = [...d.querySelectorAll('[data-cmd]')].map((b) => b.dataset.cmd).sort();
+  assert.deepStrictEqual(cmds, ['alarmOff', 'alarmOn', 'lock', 'unlock'], 'no other command buttons exist');
+  assert.strictEqual(d.getElementById('controlsBar').hidden, true, 'hidden until turned on and connected');
+  assert.strictEqual(d.getElementById('controlsChip').textContent, 'Off');
+  assert.strictEqual(d.getElementById('controlsToggleBtn').disabled, true, 'cannot be turned on without ticking the acknowledgement');
+  assert.strictEqual(d.getElementById('privacyChip').textContent, 'Read-only');
 });
 
 // ---- Plan tab: search, route, directions, following (network and GPS are faked) ----
@@ -372,6 +377,73 @@ test('Plan: Range draws a reach circle when battery and ride history are known',
   const expected = (49 * 0.25 / 2 / 1.3) * mi;
   assert.ok(Math.abs(app.leaflet.circles[0].opts.radius - expected) < 1, `radius ${app.leaflet.circles[0].opts.radius}`);
   assert.match(app.$('planStatus').textContent, /With 59% you can go about 4\.7\d mi/);
+  app.w.close();
+});
+
+// ---- Lock & alarm: opt-in, hold to confirm, standstill only ----
+function hold(app, id, ms = 950) {
+  app.$(id).dispatchEvent(new app.w.Event('pointerdown', { bubbles: true, cancelable: true }));
+  return wait(ms);
+}
+function turnOnControls(app) {
+  app.$('controlsAck').checked = true;
+  app.$('controlsAck').dispatchEvent(new app.w.Event('change'));
+  app.$('controlsToggleBtn').click();
+}
+
+test('Controls E2E: turned on in Setup, a held Lock sends exactly one lock command', async () => {
+  const app = bootApp({ extraFields: { '21000B': { len: 2, value: 0 } } });   // scooter standing still
+  await connect(app);
+  assert.strictEqual(app.$('controlsBar').hidden, true, 'off by default even when connected');
+  turnOnControls(app);
+  assert.strictEqual(app.$('controlsChip').textContent, 'On');
+  assert.strictEqual(app.$('privacyChip').textContent, 'Lock & alarm on');
+  assert.strictEqual(app.$('controlsBar').hidden, false);
+  // a quick tap does nothing
+  app.$('lockBtn').dispatchEvent(new app.w.Event('pointerdown', { bubbles: true, cancelable: true }));
+  await wait(200);
+  app.$('lockBtn').dispatchEvent(new app.w.Event('pointerup', { bubbles: true }));
+  await wait(900);
+  assert.deepStrictEqual(app.scooter.writes, [], 'a tap shorter than the hold sends nothing');
+  await hold(app, 'lockBtn');
+  await until(() => app.scooter.writes.length === 1, 'the lock command');
+  assert.deepStrictEqual(app.scooter.writes, [{ code: '210016', value: 1 }]);
+  await until(() => /Lock command accepted/.test(app.$('controlsStatus').textContent), 'the confirmation');
+  const log = JSON.parse(app.w.localStorage.getItem('niu.controlLog'));
+  assert.strictEqual(log.length, 1);
+  assert.strictEqual(log[0].name, 'lock');
+  // polling carries on afterwards
+  const before = app.scooter.log.length;
+  await wait(1300);
+  assert.ok(app.scooter.log.length > before, 'status polling resumes after the command');
+  app.w.close();
+});
+
+test('Controls E2E: while the scooter reports speed, Lock is greyed out and refused; Alarm still works', async () => {
+  const app = bootApp();                                 // default fake scooter reports 12.3 km/h
+  await connect(app);
+  turnOnControls(app);
+  await until(() => app.$('lockBtn').disabled === true, 'lock to grey out while moving');
+  await hold(app, 'lockBtn');
+  assert.deepStrictEqual(app.scooter.writes, [], 'nothing sent while moving');
+  await hold(app, 'alarmOnBtn');
+  await until(() => app.scooter.writes.length === 1, 'the alarm command');
+  assert.deepStrictEqual(app.scooter.writes, [{ code: '11000F', value: 6 }]);
+  app.w.close();
+});
+
+test('Controls E2E: turning controls off hides them again and nothing can be sent', async () => {
+  const app = bootApp({ extraFields: { '21000B': { len: 2, value: 0 } } });
+  await connect(app);
+  turnOnControls(app);
+  app.$('controlsToggleBtn').click();                    // off
+  assert.strictEqual(app.$('controlsBar').hidden, true);
+  assert.strictEqual(app.$('controlsChip').textContent, 'Off');
+  app.$('lockBtn').disabled = false;                     // even if someone forces the hidden button
+  await hold(app, 'lockBtn');
+  await wait(200);
+  assert.deepStrictEqual(app.scooter.writes, [], 'Controls.send refuses when switched off');
+  assert.match(app.$('controlsStatus').textContent, /turned off/);
   app.w.close();
 });
 

@@ -7,7 +7,9 @@
  * refusals, timeouts, polling — is tested in Node against a simulated
  * scooter (test/session.test.js).
  *
- * READ-ONLY: the session only authenticates and reads fields.
+ * READ-ONLY: the session only authenticates and reads fields. js/controls.js
+ * borrows its exchange machinery (_exclusive/_send/_next) to send its four
+ * allow-listed commands; nothing here builds a write.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {

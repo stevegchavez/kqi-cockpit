@@ -25,7 +25,7 @@ const NETWORK_TIMEOUT_MS = 4000;
 const APP_FILES = [
   './', 'index.html', 'manifest.json', 'css/style.css',
   'vendor/leaflet/leaflet.css', 'vendor/leaflet/leaflet.js',
-  'js/constants.js', 'js/crypto.js', 'js/protocol.js', 'js/session.js', 'js/keystore.js', 'js/ble.js',
+  'js/constants.js', 'js/crypto.js', 'js/protocol.js', 'js/controls.js', 'js/session.js', 'js/keystore.js', 'js/ble.js',
   'js/storage.js', 'js/insights.js', 'js/exporters.js', 'js/charts.js', 'js/battery.js', 'js/garage.js',
   'js/fields.js', 'js/diagnostics.js', 'js/diag-ui.js', 'js/planner.js', 'js/plan-ui.js', 'js/geo.js', 'js/app.js',
 ];

@@ -225,6 +225,7 @@
     }[s] || s;
     connectBtn.style.display = s === 'connected' ? 'none' : 'flex';
     rideBtn.disabled = s !== 'connected' && !state.demoTimer;
+    renderControls();
   });
 
   ble.addEventListener('connected', (e) => {
@@ -280,6 +281,7 @@
       if (next !== gaugeMaxKph) { gaugeMaxKph = next; renderGaugeLabels(); }
     }
     renderInfoStrip();
+    if (t.speedKPH !== undefined && !controlsBar.hidden) renderControls();   // lock/unlock grey out while moving
     if (!simulated) recordBattery();
     if (t.batterySOC !== undefined) updateRange();
   }
@@ -368,6 +370,7 @@
   function startRide() {
     state.isRiding = true;
     el('cockpitScreen').classList.add('riding');
+    renderControls();
     state.rideStart = Date.now();
     state.topSpeedKPH = 0;
     state.speedSamples = [];
@@ -389,6 +392,7 @@
   async function finishRide() {
     state.isRiding = false;
     el('cockpitScreen').classList.remove('riding');
+    renderControls();
     rideBtn.textContent = 'START RIDE';
     rideBtn.classList.remove('riding');
     clearInterval(state.elapsedTimer);
@@ -582,6 +586,95 @@
       bleVersion: 10,
       dashboardVersion: state.scooter.dashboardVersion || null,
     }),
+  });
+
+  // ---------- Lock & alarm (opt-in; the only part of the app that sends commands) ----------
+  // The safety rules live in NIU.Controls.send; the UI only adds hold-to-confirm and hints.
+  const HOLD_MS = 900;
+  const controlsBar = el('controlsBar');
+  const controlsStatus = el('controlsStatus');
+  const ctlButtons = [...controlsBar.querySelectorAll('.ctl-btn')];
+  let ctlBusy = false;
+
+  function setControlsStatus(text, kind) {
+    controlsStatus.textContent = text;
+    controlsStatus.dataset.kind = kind || '';
+  }
+
+  function renderControls() {
+    const on = NIU.Controls.isEnabled(localStorage);
+    const connected = ble.state === 'connected';
+    controlsBar.hidden = !(on && connected);
+    el('cockpitScreen').classList.toggle('has-controls', !controlsBar.hidden);
+    const moving = (state.scooter.speedKPH || 0) > 0;
+    for (const b of ctlButtons) {
+      const cmd = NIU.Controls.COMMANDS[b.dataset.cmd];
+      b.disabled = ctlBusy || (cmd.stillOnly && (state.isRiding || moving));
+    }
+    el('controlsChip').textContent = on ? 'On' : 'Off';
+    el('controlsChip').className = 'chip' + (on ? ' warn' : '');
+    el('controlsToggleBtn').textContent = on ? 'Turn off lock & alarm' : 'Turn on lock & alarm';
+    el('controlsToggleBtn').disabled = !on && !el('controlsAck').checked;
+    el('controlsAck').closest('label').hidden = on;
+    el('privacyChip').textContent = on ? 'Lock & alarm on' : 'Read-only';
+  }
+
+  async function runCommand(name) {
+    if (ctlBusy) return;
+    const keys = NIU.KeyStore.load();
+    if (!keys || ble.state !== 'connected' || !ble.session) { setControlsStatus('Connect to the scooter first.', 'err'); return; }
+    ctlBusy = true;
+    renderControls();
+    setControlsStatus(`Sending “${NIU.Controls.COMMANDS[name].label}”…`);
+    try {
+      await ble.withPollingPaused((session) => NIU.Controls.send(session, name, {
+        aes: keys.aes,
+        enabled: NIU.Controls.isEnabled(localStorage),
+        isRiding: state.isRiding,
+        fieldTable: NIU.Fields.FIELDS,
+        storage: localStorage,
+        lastSentAt: state.lastCommandAt,
+      }));
+      state.lastCommandAt = Date.now();
+      const hint = { lock: ' Check: the throttle should do nothing now.', unlock: ' The throttle should work again.' }[name] || '';
+      setControlsStatus(`${NIU.Controls.COMMANDS[name].done}.${hint}`, 'ok');
+    } catch (err) {
+      setControlsStatus(err.message || 'The command failed.', 'err');
+    } finally {
+      ctlBusy = false;
+      renderControls();
+    }
+  }
+
+  // Hold to confirm: a press must last HOLD_MS, so a brushed screen can't lock the scooter.
+  // A keyboard "click" (no pointer) arms the button; a second one within 3 s sends.
+  for (const b of ctlButtons) {
+    let timer = null;
+    const cancel = () => { clearTimeout(timer); timer = null; b.classList.remove('holding'); };
+    b.addEventListener('pointerdown', (e) => {
+      if (b.disabled) return;
+      e.preventDefault();
+      b.classList.add('holding');
+      timer = setTimeout(() => { cancel(); runCommand(b.dataset.cmd); }, HOLD_MS);
+    });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, cancel);
+    b.addEventListener('click', (e) => {
+      if (e.detail !== 0 || b.disabled) return;          // pointer clicks are handled by the hold
+      if (b.classList.contains('armed')) { b.classList.remove('armed'); runCommand(b.dataset.cmd); return; }
+      b.classList.add('armed');
+      setControlsStatus(`Press “${NIU.Controls.COMMANDS[b.dataset.cmd].label}” again to send it.`);
+      setTimeout(() => b.classList.remove('armed'), 3000);
+    });
+  }
+
+  el('controlsAck').addEventListener('change', renderControls);
+  el('controlsToggleBtn').addEventListener('click', () => {
+    const on = !NIU.Controls.isEnabled(localStorage);
+    if (on && !el('controlsAck').checked) return;
+    NIU.Controls.setEnabled(localStorage, on);
+    el('controlsAck').checked = false;
+    renderControls();
+    showToast(on ? 'Lock & alarm turned on. The buttons appear on the Cockpit when connected.' : 'Lock & alarm turned off. The app is read-only again.');
   });
 
   // ---------- Setup: scooter keys ----------
@@ -914,6 +1007,7 @@
 
   // ---------- Boot ----------
   initGauge();
+  renderControls();
   refreshUnitLabels();
   renderCellStrip(0);
   refreshKeysStatus();

@@ -21,7 +21,8 @@
  * against a real KQi 200F capture.
  *
  * READ-ONLY by design: this module can request fields but has no write
- * builders, so the app cannot change any scooter setting.
+ * builders. The only commands the app can send (lock, unlock, alarm on/off)
+ * live in js/controls.js behind a fixed allow-list and an opt-in switch.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {

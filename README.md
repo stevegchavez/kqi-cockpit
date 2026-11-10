@@ -1,6 +1,7 @@
 # NIU Companion — KQi Cockpit (Web Dashboard)
 
-A privacy-first, **read-only** Web Bluetooth dashboard for the NIU KQi 200F. Runs in any
+A privacy-first Web Bluetooth dashboard for the NIU KQi 200F, **read-only unless you turn on
+Lock & alarm** (then it can send exactly four commands and nothing else). Runs in any
 Web Bluetooth capable browser — **Bluefy on iOS**, Chrome on desktop/Android — with no native
 build, no App Store and no NIU account *in the app*.
 
@@ -38,7 +39,7 @@ is blank only because the sandbox had no network for map tiles):
   distance, time and a battery estimate (arrive with about X%, and whether a round trip is wise,
   using your own recorded rides), read the turn-by-turn list, and tap **Start following** to see the next
   turn and distance to it update from your phone's GPS, with an off-route warning and re-route.
-  Text only (no voice) and foreground only. **Privacy:** this is the one place the app talks to
+  Foreground only. **Privacy:** this is the one place the app talks to
   other services, and only when you tap. Place search (Nominatim) and routing
   (routing.openstreetmap.de) are sent what you type, your start and end points, and, to favour
   nearby results, a rough 100 km box around you. No keys, no account, nothing from your rides.
@@ -61,15 +62,30 @@ is blank only because the sandbox had no network for map tiles):
   Bluefy) don't run service workers; then the app just needs a connection to load.
 - **Battery current and lifetime energy** are read from the scooter and shown as raw numbers on the Cockpit
   (units not yet confirmed); ride CSVs gain a `battery_current_raw` column so the scale can be worked out.
-- **Never writes.** There are no lock, headlight, mode or setting controls, and the protocol
-  module has no command builders — a test fails if one is ever added. (The NIU protocol has
-  no headlight on/off command anyway.)
+- **Lock & alarm (opt-in, off by default):** turn it on in Setup and four hold-to-confirm buttons
+  appear on the Cockpit while connected: **Lock / Unlock** the motor (`foc_k_cmd` 1 / 2) and
+  **Alarm on / off** (`db_k_cmd` 6 / 5). That is the whole list: the commands live in
+  `js/controls.js` on a frozen allow-list, and tests fail if anything else could be built or
+  sent (no power-off, factory reset, speed limit or other settings). Safety rules are enforced
+  in that module, not just the buttons: lock and unlock are refused unless a fresh read shows
+  the scooter at 0 km/h and no ride is being recorded, so there is **no kill switch while
+  riding**; commands are spaced at least 2.5 s apart; a quick tap sends nothing. Each command
+  logs the scooter's status words before and after (on-device) so the "locked" bit can be found.
+  Limits: Bluetooth range only (no remote lock), no tracking (the 200F has no GPS or cellular
+  module), and no alerts on the phone (Bluefy can't run in the background). It's a deterrent,
+  not a replacement for a physical lock: the niu-kqi author reports NIU's server gives a
+  scooter's Bluetooth key to any NIU account that knows its Bluetooth address, which the scooter
+  broadcasts. NIU's own "Smart Start" (auto-lock when your phone leaves) can be turned on in the
+  NIU app; a Diagnostics scan of this 200F showed it off.
+- **Otherwise never writes.** The protocol module has no write builders (a test fails if one is
+  added), Diagnostics never reads command registers, and with Lock & alarm off the app sends only
+  handshake and read frames. (The NIU protocol has no headlight on/off command anyway.)
 - **Needs two per-scooter secrets** (Bluetooth password + AES key), entered once in the Setup
   tab and stored only in this browser. See "Getting your scooter keys" below.
 
 ## Status: what is verified, and what isn't
 
-**Verified by the automated tests (`npm test`, 304 tests, no scooter needed):**
+**Verified by the automated tests (`npm test`, 318 tests, no scooter needed):**
 
 | Area | How it is checked |
 | --- | --- |
@@ -77,6 +93,7 @@ is blank only because the sandbox had no network for map tiles):
 | Frame format, handshake, read requests/replies | Byte-for-byte against a separate reference implementation (`test/fixtures/niu_vectors.json`, made-up test keys) |
 | Session logic: handshake, refusals, timeouts, polling, reassembly | Against a simulated scooter written independently of the app's code |
 | Web Bluetooth call sequence, read-only guarantee | Against a fake `navigator.bluetooth` |
+| Lock & alarm: command frames, the allow-list, standstill/ride/spacing rules, refusals | Frames byte-for-byte against the reference implementation; rules against the simulated scooter and end to end in jsdom |
 | Ride stats, range estimate, battery-history rules, charge inference, health trend, charts, GPX/CSV | Unit tests on synthetic rides and samples with hand-computed answers |
 | The whole app end to end (connect, record a ride, battery history, insights, exports) | jsdom, against the simulated scooter through the fake Bluetooth, with fake GPS |
 | Diagnostics: what is never read, what is always redacted, scan/diff/watch/report | Unit tests with tripwires on the field catalogue, plus end-to-end runs against the simulated scooter |
@@ -109,6 +126,12 @@ phone's own speed reading (29.7 km/h top speed on that ride) rather than differe
 support** are tested in code (fake speech, fake GPS, fake cache) and by screenshots, not yet on
 a phone. Whether Bluefy speaks aloud and runs the service worker is unverified.
 
+**Lock & alarm has never been tried on a real KQi 200F.** The commands are the ones niu-kqi
+tested on a KQi Air; the 200F may answer differently or refuse them. First try: scooter on its
+stand, powered on, wheel off the ground. Lock, check the throttle does nothing, unlock, check it
+works again. What the scooter's "accepted" reply means for the motor is only confirmed by that
+check, not by the app.
+
 **Trip planning is tested only against canned replies** shaped like the Nominatim and OSRM
 answers (the sandbox this was built in cannot reach those services). Whether the live services
 answer in exactly that shape, how good the routes are for a scooter, and following on a real
@@ -128,7 +151,7 @@ npm install
 npm test
 ```
 
-Fifteen suites: `crypto`, `fields`, `protocol`, `session`, `ble`, `keystore`, `insights`, `exporters`, `battery`, `diagnostics`, `geo`, `planner`, `garage`, `sw`, `dom-wiring`.
+Sixteen suites: `crypto`, `fields`, `protocol`, `controls`, `session`, `ble`, `keystore`, `insights`, `exporters`, `battery`, `diagnostics`, `geo`, `planner`, `garage`, `sw`, `dom-wiring`.
 
 ## Getting your scooter keys (one time)
 
@@ -227,6 +250,7 @@ js/
   constants.js        Service UUIDs, characteristic mapping, frame headers
   crypto.js           AES-128 block cipher + MD5 (the protocol needs both)
   protocol.js         Pure frame build/parse, handshake, field decoding — read-only
+  controls.js         The only commands the app can send (lock, unlock, alarm on/off), opt-in, with safety rules
   session.js          Handshake, reads, refusal fallback, polling (transport-agnostic)
   ble.js              Web Bluetooth transport + connection state
   keystore.js         Parse/validate/store the scooter keys (localStorage)

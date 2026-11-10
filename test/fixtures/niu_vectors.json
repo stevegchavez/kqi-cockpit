@@ -272,5 +272,47 @@
    ]
   }
  },
- "rnd": "a1a1a1a1a1a1a1a15c5c5c5c5c5c5c5c"
+ "rnd": "a1a1a1a1a1a1a1a15c5c5c5c5c5c5c5c",
+ "writeAck": {
+  "frame": "01a200b62c2f2c552b874a3558b22c1a1af1d293",
+  "result": "00"
+ },
+ "writeAckNonZero": {
+  "frame": "01a200d671da75975638d119a0b80b3d1a66b41c",
+  "result": "03"
+ },
+ "writeErr": {
+  "code": "40",
+  "frame": "01e200b2ec891f1479bd19bfa811d19fb5fab3d6"
+ },
+ "writes": {
+  "alarmOff": {
+   "field": "db_k_cmd",
+   "frames": [
+    "0122004cb1e635a0e382fbe1ed3e5b8efb3773d5"
+   ],
+   "value": 5
+  },
+  "alarmOn": {
+   "field": "db_k_cmd",
+   "frames": [
+    "01220075219a0d06e150f366babc9b05f431b5e0"
+   ],
+   "value": 6
+  },
+  "lock": {
+   "field": "foc_k_cmd",
+   "frames": [
+    "012200f9faaeb34cce222e261b3928afbaa88f23"
+   ],
+   "value": 1
+  },
+  "unlock": {
+   "field": "foc_k_cmd",
+   "frames": [
+    "0122003383631ce2b484ffc3f52e980697057304"
+   ],
+   "value": 2
+  }
+ }
 }
