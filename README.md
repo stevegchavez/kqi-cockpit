@@ -144,6 +144,14 @@ ride are unverified until tried on a phone with a connection.
 - A full **recorded ride** with GPS and a saved route.
 - Odometer isn't shown (no field has been confirmed for it).
 
+## Apple Watch app (beta)
+
+`watch/` holds a standalone watchOS app that connects to the scooter directly from the watch:
+speed dial with efficiency colours, battery, and rides recorded as cycling workouts in Apple
+Health. Its protocol code (`watch/KQiCore`) is a Swift port tested against the same reference
+vectors (`swift test` on a Mac). It has not been built or run on a watch yet. Build steps:
+[`watch/README.md`](watch/README.md).
+
 ## Running the tests
 
 ```bash
@@ -271,5 +279,6 @@ sw.js                 Service worker: offline app files and viewed map tiles
 vendor/leaflet/       Vendored Leaflet 1.9.4 (BSD-2)
 tools/                gen_fields.py (regenerates js/fields.js from the source field table)
 test/                 One *.test.js per suite, fixtures/ and helpers/
+watch/                Apple Watch app: KQiCore Swift package (+ tests) and the watch app's code
 NOTICE.md             Credits and third-party licences
 ```
