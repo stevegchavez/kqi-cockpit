@@ -1,0 +1,36 @@
+name: KQi Watch
+options:
+  bundleIdPrefix: com.kqicockpit
+  deploymentTarget:
+    watchOS: "10.0"
+packages:
+  KQiCore:
+    path: KQiCore
+targets:
+  KQi Watch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: KQiWatch
+    dependencies:
+      - package: KQiCore
+    entitlements:
+      path: KQiWatch/KQiWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    info:
+      path: KQiWatch/Info.plist
+      properties:
+        WKApplication: true
+        WKBackgroundModes: [workout-processing]
+        NSBluetoothAlwaysUsageDescription: Connects to your NIU scooter to show its speed and battery.
+        NSHealthShareUsageDescription: Shows your heart rate during rides.
+        NSHealthUpdateUsageDescription: Saves your scooter rides as cycling workouts.
+        NSLocationWhenInUseUsageDescription: Records the route and distance of your rides.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kqicockpit.kqiwatch
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: KQiWatch/KQiWatch.entitlements

@@ -22,7 +22,8 @@ public actor NiuSession {
     /// Read once per connection.
     public static let staticGroup = ["foc_k_max_speed", "bms_rated_vlt", "db_k_sw_ver", "bms_c_cont", "bms_soh_rt"]
 
-    private weak var transport: NiuTransport?
+    // Strong: the session keeps its transport alive. The owner must call close() to break the cycle.
+    private var transport: NiuTransport?
     private let password: String
     private let aes: String
     private let timeout: TimeInterval
@@ -50,6 +51,9 @@ public actor NiuSession {
         self.inbox = continuation
         Task { await self.startPump(stream) }
     }
+
+    /// Releases the transport. Call when the link is torn down.
+    public func close() { transport = nil; verified = false }
 
     private func startPump(_ stream: AsyncStream<[UInt8]>) {
         pump = Task { [weak self] in
