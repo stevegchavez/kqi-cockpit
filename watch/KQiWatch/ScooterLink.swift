@@ -171,6 +171,7 @@ final class ScooterLink: NSObject, ObservableObject, NiuTransport {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        if let s = session { Task { await s.close() } }
         session = nil
     }
 
